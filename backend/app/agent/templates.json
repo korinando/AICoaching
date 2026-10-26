@@ -1,0 +1,16 @@
+{
+  "junior_backend": {
+    "role": "Junior Backend Developer",
+    "level": "junior",
+    "interview_type": "technical",
+    "topics": ["REST APIs", "Databases", "Git", "Debugging", "Teamwork"],
+    "max_main_questions": 5
+  },
+  "junior_frontend":{
+        "role": "Junior Frontend Developer",
+        "level": "junior",
+        "interview_type": "technical",
+        "topics": ["HTML/CSS","JavaScript","React","Browser debugging", "Teamwork"],
+        "max_main_questions": 5
+      }
+}
