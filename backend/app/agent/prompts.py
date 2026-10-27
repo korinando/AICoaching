@@ -1,4 +1,6 @@
 from app.agent.schemas import Action, InterviewState, Message
+from app.agent.history import earlier_summary, omitted_count, recent_messages
+
 
 ACTION_MEANINGS: dict[Action, str] = {
     "follow_up": "ask one deeper question about the current topic",
@@ -46,11 +48,15 @@ def format_transcript(history: list[Message]) -> str:
 
 
 def build_user_message(state: InterviewState) -> str:
-    """The conversation so far, wrapped in <transcript> tags."""
+    """Summary of earlier topics plus the most recent messages, wrapped in <transcript> tags."""
     parts = []
-    if state.summary:
-        parts.append(f"Summary of earlier conversation:\n{state.summary}")
-    parts.append(f"<transcript>\n{format_transcript(state.history)}\n</transcript>")
+    summary = earlier_summary(state)
+    if summary:
+        parts.append(summary)
+    if omitted_count(state):
+        parts.append(f"({omitted_count(state)} earlier messages not shown.)")
+    transcript = format_transcript(recent_messages(state))
+    parts.append(f"<transcript>\n{transcript}\n</transcript>")
     parts.append("Decide the next action.")
     return "\n\n".join(parts)
 
