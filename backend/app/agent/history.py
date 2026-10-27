@@ -16,7 +16,6 @@ def omitted_count(state: InterviewState) -> int:
 
 def earlier_summary(state: InterviewState) -> str:
     """A short, deterministic summary of what came before the current topic."""
-    # ✏️ Your turn
     covered = state.planned_topics[: state.current_topic_index]
     if state.current_topic_index == 0:
         return ""
