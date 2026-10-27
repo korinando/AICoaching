@@ -29,3 +29,31 @@ class InterviewState(BaseModel):
     history: list[Message] = []
     summary: str = ""
     finished: bool = False
+
+    @property
+    def current_topic(self) -> str:
+        return self.planned_topics[self.current_topic_index]
+
+    @property
+    def last_topic_index(self) -> int:
+        return min(len(self.planned_topics), self.max_main_questions) - 1
+
+    @property
+    def is_last_topic(self) -> bool:
+        return self.current_topic_index >= self.last_topic_index
+
+    @property
+    def next_topic(self) -> str | None:
+        if self.is_last_topic:
+            return None
+        return self.planned_topics[self.current_topic_index + 1]
+
+    def allowed_actions(self) -> list[Action]:
+        actions: list[Action] = []
+        if self.follow_ups_on_current < self.max_follow_ups:
+            actions.append("follow_up")
+        if self.is_last_topic:
+            actions.append("end")
+        else:
+            actions.append("next_question")
+        return actions
