@@ -26,6 +26,7 @@ class InterviewState(BaseModel):
     follow_ups_on_current: int = Field(default=0, ge=0)
     max_follow_ups: int = 2
     max_main_questions: int = 6
+    short_answer_retries: int = Field(default=0, ge=0)
     history: list[Message] = []
     summary: str = ""
     finished: bool = False
