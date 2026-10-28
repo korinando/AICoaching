@@ -1,4 +1,7 @@
-from app.agent.schemas import AgentDecision
+from app.agent.schemas import Action, AgentDecision
+
+# A normal answer: long enough (3+ words) to pass the short-answer check and reach the LLM.
+ANSWER = "I would add an index to the table."
 
 
 class FakeLLMClient:
@@ -16,3 +19,8 @@ class FakeLLMClient:
         if isinstance(result, Exception):
             raise result
         return result
+
+
+def decision(action: Action, text: str = "Scripted reply.") -> AgentDecision:
+    """A scripted AgentDecision for FakeLLMClient."""
+    return AgentDecision(action=action, reasoning="test", text=text)

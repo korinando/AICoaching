@@ -1,7 +1,6 @@
 from app.agent.history import MAX_RECENT_MESSAGES, earlier_summary, recent_messages
 from app.agent.prompts import build_user_message
 from app.agent.schemas import Message
-from app.agent.templates import new_state
 
 
 def long_history(count: int) -> list[Message]:
@@ -12,14 +11,12 @@ def long_history(count: int) -> list[Message]:
     ]
 
 
-def test_short_history_is_sent_in_full():
-    state = new_state("junior_backend")
+def test_short_history_is_sent_in_full(state):
     state.history = long_history(4)
     assert recent_messages(state) == state.history
 
 
-def test_long_history_keeps_only_the_last_messages():
-    state = new_state("junior_backend")
+def test_long_history_keeps_only_the_last_messages(state):
     state.history = long_history(20)
 
     recent = recent_messages(state)
@@ -29,8 +26,8 @@ def test_long_history_keeps_only_the_last_messages():
     assert recent[0].text == "message 14"
 
 
-def test_trimming_never_changes_the_real_history():
-    state = new_state("junior_backend")
+def test_trimming_never_changes_the_real_history(state):
+    """The full transcript is needed for the screen (Week 2) and the report (Week 5)."""
     state.history = long_history(20)
 
     build_user_message(state)
@@ -38,20 +35,17 @@ def test_trimming_never_changes_the_real_history():
     assert len(state.history) == 20
 
 
-def test_user_message_mentions_omitted_messages():
-    state = new_state("junior_backend")
+def test_user_message_mentions_omitted_messages(state):
     state.history = long_history(20)
     message = build_user_message(state)
     assert "14 earlier messages not shown" in message
     assert "message 13" not in message
 
 
-def test_no_summary_on_first_topic():
-    state = new_state("junior_backend")
+def test_no_summary_on_first_topic(state):
     assert earlier_summary(state) == ""
 
 
-def test_summary_lists_covered_topics():
-    state = new_state("junior_backend")
+def test_summary_lists_covered_topics(state):
     state.current_topic_index = 2
     assert earlier_summary(state) == "Topics already covered: REST APIs, Databases."

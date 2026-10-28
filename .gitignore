@@ -24,6 +24,7 @@ out/
 *.mp3
 *.m4a
 data/
+transcripts/
 
 # Editors / OS
 .vscode/

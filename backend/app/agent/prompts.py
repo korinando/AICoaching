@@ -1,11 +1,10 @@
-from app.agent.schemas import Action, InterviewState, Message
 from app.agent.history import earlier_summary, omitted_count, recent_messages
-
+from app.agent.schemas import Action, InterviewState, Message
 
 ACTION_MEANINGS: dict[Action, str] = {
     "follow_up": "ask one deeper question about the current topic",
     "next_question": "move on and ask the first question about the next topic",
-    "end": "thank the candidate briefly and close the interview (no question)",
+    "end": "thank the candidate briefly and close the interview (no question, do not mention next steps or results)",
 }
 
 
