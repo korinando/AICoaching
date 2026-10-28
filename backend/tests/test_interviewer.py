@@ -1,8 +1,8 @@
 import pytest
 
-from app.agent.interviewer import CLOSING_TEXT, REPEAT_TEXT, Interviewer
+from app.agent.interviewer import CLOSING_TEXT, OWN_WORDS_TEXT, REPEAT_TEXT, Interviewer
 from app.agent.llm_client import LLMError
-from app.agent.schemas import InterviewState
+from app.agent.schemas import InterviewState, Message
 from tests.fakes import ANSWER, FakeLLMClient, decision
 
 # --- Follow-up limit ---------------------------------------------------------------------------
@@ -195,3 +195,56 @@ def test_start_falls_back_when_llm_fails(state):
 
     assert "REST APIs" in reply
     assert len(state.history) == 1
+
+
+# --- Pasted question (Step 10) -----------------------------------------------------------------
+
+QUESTION = "How do you handle a disagreement with a teammate?"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        QUESTION,  # exact copy (transcript 13-21-52)
+        f"Interviewer: {QUESTION}",  # copied with the label (transcript 16-04-22)
+        QUESTION.upper(),  # case doesn't matter
+    ],
+)
+def test_pasted_question_is_not_sent_to_llm(state, answer):
+    """The candidate pasted the interviewer's question back: ask for their own words."""
+    fake = FakeLLMClient([])  # any LLM call would fail: no scripted decisions
+    state.history = [Message(role="interviewer", text=QUESTION)]
+
+    reply = Interviewer(fake).handle_answer(state, answer)
+
+    assert reply == OWN_WORDS_TEXT
+    assert fake.calls == []
+    assert state.follow_ups_on_current == 0  # no follow-up used up
+    assert state.history[-1].text == OWN_WORDS_TEXT
+
+
+def test_question_repeated_before_a_real_answer_goes_to_llm(state):
+    """Restating the question and then answering is fine, so only near-copies are caught."""
+    fake = FakeLLMClient([decision("follow_up")])
+    state.history = [Message(role="interviewer", text=QUESTION)]
+
+    reply = Interviewer(fake).handle_answer(state, f"{QUESTION} I listen first, then we compare.")
+
+    assert reply != OWN_WORDS_TEXT
+    assert len(fake.calls) == 1
+
+
+def test_pasting_stops_after_max_retries(state):
+    """Pasting shares the short-answer budget: the 3rd paste is accepted, so it can't loop."""
+    fake = FakeLLMClient([decision("follow_up")])
+    interviewer = Interviewer(fake)
+    state.history = [Message(role="interviewer", text=QUESTION)]
+
+    first = interviewer.handle_answer(state, QUESTION)
+    # The last interviewer message is now OWN_WORDS_TEXT, so paste that instead.
+    second = interviewer.handle_answer(state, OWN_WORDS_TEXT)
+    third = interviewer.handle_answer(state, OWN_WORDS_TEXT)
+
+    assert first == second == OWN_WORDS_TEXT
+    assert third != OWN_WORDS_TEXT
+    assert len(fake.calls) == 1

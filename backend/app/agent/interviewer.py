@@ -8,6 +8,7 @@ from app.agent.schemas import Action, AgentDecision, InterviewState, Message
 MIN_ANSWER_WORDS = 3
 MAX_SHORT_ANSWER_RETRIES = 2
 REPEAT_TEXT = "Could you say a bit more about that?"
+OWN_WORDS_TEXT = "Please answer the question in your own words."
 CLOSING_TEXT = "Thank you for your time today. That's the end of our interview."
 
 
@@ -102,15 +103,13 @@ class Interviewer:
         if state.finished:
             raise RuntimeError("Interview already finished")
 
-        # Guard clause: too-short answer -> ask again without calling the LLM.
-        if (
-            len(answer.split()) < MIN_ANSWER_WORDS
-            and state.short_answer_retries < MAX_SHORT_ANSWER_RETRIES
-        ):
-            state.short_answer_retries += 1
-            state.history.append(Message(role="candidate", text=answer))
-            state.history.append(Message(role="interviewer", text=REPEAT_TEXT))
-            return REPEAT_TEXT
+        # Guard clauses: not a real answer -> ask again without calling the LLM.
+        # Both share one retry budget, so no mix of pasting and "ok" can loop forever.
+        if state.short_answer_retries < MAX_SHORT_ANSWER_RETRIES:
+            if _is_pasted_question(state, answer):
+                return self._ask_again(state, answer, OWN_WORDS_TEXT)
+            if len(answer.split()) < MIN_ANSWER_WORDS:
+                return self._ask_again(state, answer, REPEAT_TEXT)
 
         state.short_answer_retries = 0
         state.history.append(Message(role="candidate", text=answer))
@@ -122,3 +121,23 @@ class Interviewer:
         self._apply_decision(state, decision.action)
         state.history.append(Message(role="interviewer", text=decision.text))
         return decision.text
+
+    def _ask_again(self, state: InterviewState, answer: str, text: str) -> str:
+        """Record the answer and a fixed reply, using one retry. No LLM call, no topic change."""
+        state.short_answer_retries += 1
+        state.history.append(Message(role="candidate", text=answer))
+        state.history.append(Message(role="interviewer", text=text))
+        return text
+
+
+def _is_pasted_question(state: InterviewState, answer: str) -> bool:
+    """True if the answer is the last question copied back, with almost nothing added (Step 10)."""
+    if not state.history or state.history[-1].role != "interviewer":
+        return False  # no question asked yet
+    question = state.history[-1].text.strip().lower()
+    if not question or question not in answer.lower():
+        return False
+    # Remove the question and look at what is left: "Interviewer: <question>" leaves 1 word,
+    # but "<question> I would ask my teammate..." leaves a real answer, which must go through.
+    leftover = answer.lower().replace(question, "")
+    return len(leftover.split()) < MIN_ANSWER_WORDS
