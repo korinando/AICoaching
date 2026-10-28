@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app.agent.interviewer import Interviewer
-from app.agent.llm_client import GeminiLLMClient
+from app.agent.llm_client import GeminiLLMClient, TokenUsage
 from app.agent.schemas import InterviewState
 from app.agent.templates import load_templates, new_state
 
@@ -26,12 +27,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def save_transcript(state: InterviewState) -> Path:
-    """Write the full state (including history) to transcripts/<timestamp>.json."""
+def save_transcript(state: InterviewState, usage: TokenUsage) -> Path:
+    """Write the full state (including history) plus token usage to transcripts/<timestamp>.json."""
     TRANSCRIPTS_DIR.mkdir(exist_ok=True)
     filename = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".json"
     path = TRANSCRIPTS_DIR / filename
-    path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    # token_usage is an extra key next to the state's fields. InterviewState ignores unknown
+    # keys when loading, so review_transcript and old transcripts keep working.
+    data = state.model_dump(mode="json") | {"token_usage": usage.model_dump()}
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
 
 
@@ -51,7 +55,9 @@ def main() -> None:
     load_dotenv()
 
     state = new_state(args.template)
-    interviewer = Interviewer(GeminiLLMClient(model=os.environ["LLM_MODEL"]))
+    # Own variable: main() needs it at the end to read the token totals.
+    llm = GeminiLLMClient(model=os.environ["LLM_MODEL"])
+    interviewer = Interviewer(llm)
 
     print(f"=== Mock interview: {state.role} ({state.level}) ===")
     print("Type your answer and press Enter. Type /quit to stop.\n")
@@ -71,7 +77,7 @@ def main() -> None:
     except (KeyboardInterrupt, EOFError):
         print("\n\nInterview stopped.")
     finally:
-        path = save_transcript(state)
+        path = save_transcript(state, llm.usage)
         print(f"\nTranscript saved to {path}")
 
 

@@ -6,6 +6,7 @@ Run from backend/:
 """
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -33,9 +34,11 @@ JUDGEMENT_WORDS = [
 ]
 
 
-def load(name: str | None) -> tuple[Path, InterviewState]:
+def load(name: str | None) -> tuple[Path, InterviewState, dict | None]:
+    """Returns the state plus the saved token_usage (None in transcripts made before it existed)."""
     path = TRANSCRIPTS_DIR / name if name else max(TRANSCRIPTS_DIR.glob("*.json"))
-    return path, InterviewState.model_validate_json(path.read_text(encoding="utf-8"))
+    raw = path.read_text(encoding="utf-8")
+    return path, InterviewState.model_validate_json(raw), json.loads(raw).get("token_usage")
 
 
 def flags_for(text: str, previous_question: str | None) -> list[str]:
@@ -64,7 +67,7 @@ def main() -> None:
     parser.add_argument("name", nargs="?", help="file name in transcripts/ (default: newest)")
     args = parser.parse_args()
 
-    path, state = load(args.name)
+    path, state, usage = load(args.name)
     print(
         f"=== {path.name}: {state.role} | finished={state.finished} | "
         f"{len(state.history)} messages ===\n"
@@ -86,6 +89,14 @@ def main() -> None:
     print(
         f"\n{total_flags} flag(s). Flags are hints: read each one and decide if it's a real problem."
     )
+    if usage:
+        print(
+            f"Tokens: {usage['total_tokens']} total in {usage['calls']} calls "
+            f"(input {usage['input_tokens']}, output {usage['output_tokens']}, "
+            f"thinking {usage['thought_tokens']})"
+        )
+    else:
+        print("Tokens: not recorded (transcript made before token tracking).")
 
 
 if __name__ == "__main__":
