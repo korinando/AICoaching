@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr = Field(min_length=32)
     gemini_api_key: SecretStr
     llm_model: str = "gemini-3.5-flash-lite"
+    # Short access tokens limit the damage if one leaks; the refresh token gets new ones.
+    access_token_minutes: int = 15
+    refresh_token_days: int = 7
 
 
 @lru_cache
