@@ -1,11 +1,15 @@
 """Shared FastAPI dependencies: things an endpoint asks for in its parameters."""
 
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.agent.interviewer import Interviewer
+from app.agent.llm_client import GeminiLLMClient
+from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import TokenError, decode_token
 from app.models import User
@@ -40,3 +44,20 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+@lru_cache
+def get_interviewer() -> Interviewer:
+    """One Interviewer for the whole server, created on first use.
+
+    Safe to share between users because the Interviewer is stateless (Week 1 design): all
+    interview data comes in through the InterviewState. Tests replace this with a fake LLM.
+    """
+    settings = get_settings()
+    llm = GeminiLLMClient(
+        model=settings.llm_model, api_key=settings.gemini_api_key.get_secret_value()
+    )
+    return Interviewer(llm)
+
+
+InterviewerDep = Annotated[Interviewer, Depends(get_interviewer)]

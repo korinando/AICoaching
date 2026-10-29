@@ -12,7 +12,7 @@ from app.agent.templates import new_state
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.main import app
-from app.models import Base
+from app.models import Base, InterviewTemplate, User
 
 TEST_DB_NAME = "ai_coach_test"
 
@@ -71,6 +71,32 @@ def db(test_engine: Engine) -> Iterator[Session]:
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture
+def user(db: Session) -> User:
+    """A user row. password_hash is a placeholder: these tests never log in with it."""
+    user = User(email="candidate@example.com", password_hash="not-a-real-hash", name="Cand")
+    db.add(user)
+    db.flush()  # send the INSERT now so user.id is set, without committing
+    return user
+
+
+@pytest.fixture
+def template(db: Session) -> InterviewTemplate:
+    """Same topics as the `state` fixture: REST APIs, Databases, Git, Debugging, Teamwork."""
+    template = InterviewTemplate(
+        slug="junior_backend",
+        role="Junior Backend Developer",
+        level="junior",
+        interview_type="technical",
+        topics=["REST APIs", "Databases", "Git", "Debugging", "Teamwork"],
+        max_main_questions=5,
+        max_follow_ups=2,
+    )
+    db.add(template)
+    db.flush()
+    return template
 
 
 @pytest.fixture

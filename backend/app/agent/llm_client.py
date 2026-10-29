@@ -42,11 +42,11 @@ class TokenUsage(BaseModel):
 class GeminiLLMClient:
     """LLMClient that calls the Gemini API."""
 
-    def __init__(self, model: str, timeout: float = 60) -> None:
+    def __init__(self, model: str, api_key: str | None = None, timeout: float = 60) -> None:
         self.model = model
         self.timeout = timeout
         self.usage = TokenUsage()
-        self.client = genai.Client()
+        self.client = genai.Client(api_key=api_key)
 
     def decide(self, system: str, user: str) -> AgentDecision:
         try:
