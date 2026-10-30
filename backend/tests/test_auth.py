@@ -129,6 +129,15 @@ def test_refresh_gives_working_tokens(client):
     assert client.get("/auth/me", headers=auth_header(new_access)).status_code == 200
 
 
+def test_refresh_for_deleted_user_is_401(client):
+    """A valid refresh token for an account that no longer exists must not give new tokens."""
+    response = client.post(
+        "/auth/refresh", json={"refresh_token": create_token(999_999, "refresh")}
+    )
+
+    assert response.status_code == 401
+
+
 def test_refresh_rejects_access_token(client):
     register(client)
     access_token = login(client).json()["access_token"]

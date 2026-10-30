@@ -3,8 +3,9 @@
 import pytest
 
 from app.agent.interviewer import CLOSING_TEXT, REPEAT_TEXT
+from app.agent.llm_client import LLMError
 from app.core.security import create_token
-from app.models import User
+from app.models import Turn, User
 from tests.fakes import ANSWER, decision
 
 OPENING = "Welcome! What is REST?"
@@ -99,6 +100,45 @@ def test_answer_too_long_is_422(client, auth_headers, fake_llm, template):
     )
 
     assert response.status_code == 422
+
+
+def test_answer_to_missing_session_is_404(client, auth_headers, fake_llm):
+    response = client.post("/sessions/999999/answer", json={"text": ANSWER}, headers=auth_headers)
+
+    assert response.status_code == 404
+    assert fake_llm.calls == []
+
+
+def test_llm_down_still_answers_with_fallback(client, auth_headers, fake_llm, template):
+    """Gemini fails twice: the Week 1 fallback moves on, and the user still gets a 200."""
+    session = start(client, auth_headers, fake_llm, template)
+    fake_llm.script.extend([LLMError("503 overloaded"), LLMError("503 overloaded")])
+
+    response = client.post(
+        f"/sessions/{session['id']}/answer", json={"text": ANSWER}, headers=auth_headers
+    )
+
+    assert response.status_code == 200
+    assert "Databases" in response.json()["turns"][-1]["text"]  # fallback names the next topic
+
+
+def test_double_submit_is_409_not_500(client, db, auth_headers, fake_llm, template):
+    """Two answers for one session at the same moment (e.g. a double click).
+
+    Simulated by saving a turn at the next position behind the agent's back, which is what
+    the faster of two parallel requests does. The slower one must get a clear 409, not a
+    500 crash from the database's unique (session_id, turn_index) constraint.
+    """
+    session = start(client, auth_headers, fake_llm, template)
+    db.add(Turn(session_id=session["id"], turn_index=1, speaker="candidate", text="first click"))
+    db.flush()
+    fake_llm.script.append(decision("follow_up"))
+
+    response = client.post(
+        f"/sessions/{session['id']}/answer", json={"text": ANSWER}, headers=auth_headers
+    )
+
+    assert response.status_code == 409
 
 
 def test_full_interview_then_answer_is_409(client, auth_headers, fake_llm, template):

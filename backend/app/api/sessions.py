@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DB, CurrentUser, InterviewerDep
 from app.api.schemas import AnswerOut, AnswerRequest, SessionCreate, SessionOut, TurnOut
@@ -53,5 +54,13 @@ def answer(
     except InterviewClosedError:
         # 409 Conflict: the request is valid, but the session's state doesn't allow it.
         raise HTTPException(status.HTTP_409_CONFLICT, "Interview already finished") from None
+    except IntegrityError:
+        # Another answer for this session was saved while this one was being processed
+        # (e.g. a double click): both tried the same turn_index, and the unique constraint
+        # kept only the first. Undo this one; the client reloads the session.
+        db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Another answer was saved first. Reload the interview."
+        ) from None
     new_turns = session.turns[before:]
     return AnswerOut(status=session.status, turns=[TurnOut.model_validate(t) for t in new_turns])
