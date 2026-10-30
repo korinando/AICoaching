@@ -1,12 +1,23 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DB, CurrentUser, InterviewerDep
-from app.api.schemas import AnswerOut, AnswerRequest, SessionCreate, SessionOut, TurnOut
+from app.api.schemas import (
+    AnswerOut,
+    AnswerRequest,
+    AudioReceived,
+    SessionCreate,
+    SessionOut,
+    TurnOut,
+)
 from app.models import InterviewSession, InterviewTemplate, User
 from app.services.interviews import InterviewClosedError, start_interview, submit_answer
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+# Opus (Chrome) is about 4 KB per second of speech, so 10 MB is many minutes of talking:
+# far more than any answer, but small enough that one request can't fill the server's memory.
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
 def _get_own_session(db: DB, session_id: int, user: User) -> InterviewSession:
@@ -64,3 +75,31 @@ def answer(
         ) from None
     new_turns = session.turns[before:]
     return AnswerOut(status=session.status, turns=[TurnOut.model_validate(t) for t in new_turns])
+
+
+@router.post("/{session_id}/audio")
+def upload_audio(session_id: int, audio: UploadFile, db: DB, user: CurrentUser) -> AudioReceived:
+    """Receive one spoken answer as a file (multipart/form-data, field name "audio").
+
+    Week 3 Step 2: only checks and measures the upload. Steps 3-6 add ffmpeg, storage,
+    speech-to-text and the interviewer's spoken reply.
+    """
+    session = _get_own_session(db, session_id, user)
+    if session.status != "in_progress":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Interview already finished")
+
+    # The browser sends e.g. "audio/webm;codecs=opus"; the part before ";" is the format.
+    # This header is only the client's claim: ffmpeg (Step 3) checks the real content.
+    content_type = audio.content_type or ""
+    if not content_type.split(";")[0].startswith("audio/"):
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Expected an audio file")
+
+    # Read at most one byte more than allowed: enough to know it's too big, without
+    # loading a huge upload into memory.
+    data = audio.file.read(MAX_AUDIO_BYTES + 1)
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Recording is too long")
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The recording is empty")
+
+    return AudioReceived(size_bytes=len(data), content_type=content_type)

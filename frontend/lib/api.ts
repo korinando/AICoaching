@@ -1,11 +1,17 @@
 // Talks to the FastAPI backend. Every request goes through apiFetch(), which adds the login
 // token and, when the access token has expired, gets a new one with the refresh token.
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // ---- Types: the same shapes as backend/app/api/schemas.py ----------------------------------
 
-export type User = { id: number; email: string; name: string; created_at: string };
+export type User = {
+  id: number;
+  email: string;
+  name: string;
+  created_at: string;
+};
 
 export type Template = {
   id: number;
@@ -78,7 +84,8 @@ async function errorFrom(response: Response): Promise<ApiError> {
   try {
     const body = await response.json();
     if (typeof body.detail === "string") message = body.detail;
-    else if (Array.isArray(body.detail)) message = body.detail.map((d: { msg: string }) => d.msg).join("; ");
+    else if (Array.isArray(body.detail))
+      message = body.detail.map((d: { msg: string }) => d.msg).join("; ");
   } catch {
     // Not JSON: keep the generic message.
   }
@@ -107,17 +114,29 @@ async function refreshTokens(): Promise<boolean> {
   return true;
 }
 
-async function apiFetch<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+async function apiFetch<T>(
+  path: string,
+  options: { method?: string; body?: unknown } = {},
+): Promise<T> {
+  // A file upload (FormData) is sent as it is, WITHOUT a Content-Type header: the browser then
+  // writes "multipart/form-data; boundary=..." itself, and the boundary (the marker between
+  // the parts) can't be known in advance. Everything else is sent as JSON.
+  const isForm = options.body instanceof FormData;
   const send = () =>
     fetch(`${API_URL}${path}`, {
       method: options.method ?? "GET",
       headers: {
-        "Content-Type": "application/json",
+        ...(!isForm && { "Content-Type": "application/json" }),
         ...(localStorage.getItem(ACCESS_KEY) && {
           Authorization: `Bearer ${localStorage.getItem(ACCESS_KEY)}`,
         }),
       },
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body:
+        options.body === undefined
+          ? undefined
+          : isForm
+            ? (options.body as FormData)
+            : JSON.stringify(options.body),
     });
 
   let response = await send();
@@ -133,11 +152,23 @@ async function apiFetch<T>(path: string, options: { method?: string; body?: unkn
 // ---- One function per endpoint -------------------------------------------------------------
 
 export async function login(email: string, password: string): Promise<void> {
-  saveTokens(await apiFetch<TokenPair>("/auth/login", { method: "POST", body: { email, password } }));
+  saveTokens(
+    await apiFetch<TokenPair>("/auth/login", {
+      method: "POST",
+      body: { email, password },
+    }),
+  );
 }
 
-export async function register(email: string, password: string, name: string): Promise<void> {
-  await apiFetch<User>("/auth/register", { method: "POST", body: { email, password, name } });
+export async function register(
+  email: string,
+  password: string,
+  name: string,
+): Promise<void> {
+  await apiFetch<User>("/auth/register", {
+    method: "POST",
+    body: { email, password, name },
+  });
   await login(email, password); // registering logs you in straight away
 }
 
@@ -146,9 +177,29 @@ export const getMe = () => apiFetch<User>("/auth/me");
 export const listTemplates = () => apiFetch<Template[]>("/templates");
 
 export const createSession = (templateId: number) =>
-  apiFetch<Session>("/sessions", { method: "POST", body: { template_id: templateId } });
+  apiFetch<Session>("/sessions", {
+    method: "POST",
+    body: { template_id: templateId },
+  });
 
 export const getSession = (id: number) => apiFetch<Session>(`/sessions/${id}`);
 
 export const sendAnswer = (id: number, text: string) =>
-  apiFetch<AnswerResult>(`/sessions/${id}/answer`, { method: "POST", body: { text } });
+  apiFetch<AnswerResult>(`/sessions/${id}/answer`, {
+    method: "POST",
+    body: { text },
+  });
+
+export type AudioReceived = { size_bytes: number; content_type: string };
+
+/** Week 3 Step 2: send a recording; the backend only confirms what it received for now. */
+export function uploadAudio(id: number, blob: Blob) {
+  const form = new FormData();
+  // "audio" must match the backend parameter name. The file name is only a label; the
+  // format travels as the blob's type (e.g. "audio/webm;codecs=opus").
+  form.append("audio", blob, "answer");
+  return apiFetch<AudioReceived>(`/sessions/${id}/audio`, {
+    method: "POST",
+    body: form,
+  });
+}

@@ -2,9 +2,24 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { type KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-import { ApiError, getSession, sendAnswer, type Session, type Turn } from "@/lib/api";
+import { TalkButton } from "@/components/TalkButton";
+import {
+  ApiError,
+  getSession,
+  sendAnswer,
+  type Session,
+  type Turn,
+  uploadAudio,
+} from "@/lib/api";
+import type { Recording } from "@/lib/useRecorder";
 import { useRequireLogin } from "@/lib/useRequireLogin";
 
 /** The [id] in the URL is only known when someone opens the page, not at build time.
@@ -28,6 +43,8 @@ function Interview() {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null); // answer sent, reply not back yet
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [audioInfo, setAudioInfo] = useState<string | null>(null); // Step 2: what the server got
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Load the whole transcript from the server. This is what makes a page refresh safe:
@@ -36,7 +53,13 @@ function Interview() {
     if (!ready) return;
     getSession(sessionId)
       .then(setSession)
-      .catch((e) => setError(e instanceof ApiError && e.status === 404 ? "Interview not found." : String(e.message)));
+      .catch((e) =>
+        setError(
+          e instanceof ApiError && e.status === 404
+            ? "Interview not found."
+            : String(e.message),
+        ),
+      );
   }, [ready, sessionId]);
 
   // Keep the newest message in view.
@@ -53,13 +76,38 @@ function Interview() {
     try {
       const result = await sendAnswer(session.id, text);
       // The server returns the answer as saved plus the reply: append both.
-      setSession({ ...session, status: result.status, turns: [...session.turns, ...result.turns] });
+      setSession({
+        ...session,
+        status: result.status,
+        turns: [...session.turns, ...result.turns],
+      });
     } catch (e) {
       setDraft(text); // give the text back so nothing typed is lost
       setError(e instanceof Error ? e.message : "Could not send the answer");
-      if (e instanceof ApiError && e.status === 409) setSession(await getSession(session.id));
+      if (e instanceof ApiError && e.status === 409)
+        setSession(await getSession(session.id));
     } finally {
       setPending(null);
+    }
+  }
+
+  /** Step 2: upload the recording and show what the server received. From Step 5 the
+   * response will contain the transcribed answer and the reply, like sendAnswer. */
+  async function sendRecording(recording: Recording) {
+    if (!session) return;
+    setUploading(true);
+    setError(null);
+    setAudioInfo(null);
+    try {
+      const received = await uploadAudio(session.id, recording.blob);
+      setAudioInfo(
+        `Server received ${(received.size_bytes / 1024).toFixed(1)} KB (${received.content_type}), ` +
+          `${(recording.durationMs / 1000).toFixed(1)} s. Turning speech into text comes in Step 5.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send the recording");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -79,10 +127,15 @@ function Interview() {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col p-4">
       <header className="mb-4 flex items-center justify-between">
-        <Link href="/dashboard" className="text-sm text-zinc-500 hover:underline">
+        <Link
+          href="/dashboard"
+          className="text-sm text-zinc-500 hover:underline"
+        >
           ← Dashboard
         </Link>
-        <span className="text-sm text-zinc-500">{finished ? "Finished" : "In progress"}</span>
+        <span className="text-sm text-zinc-500">
+          {finished ? "Finished" : "In progress"}
+        </span>
       </header>
 
       <ol className="flex-1 space-y-3">
@@ -102,40 +155,61 @@ function Interview() {
 
       {finished ? (
         <p className="mt-4 rounded-lg bg-zinc-100 p-4 text-center text-sm dark:bg-zinc-800">
-          The interview is over. <Link href="/dashboard" className="underline">Start another one</Link>
+          The interview is over.{" "}
+          <Link href="/dashboard" className="underline">
+            Start another one
+          </Link>
         </p>
       ) : (
-        <div className="sticky bottom-0 mt-4 flex gap-2 bg-background py-2">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            disabled={pending !== null}
-            maxLength={4000}
-            rows={3}
-            placeholder="Type your answer… (Enter to send, Shift+Enter for a new line)"
-            className="flex-1 resize-none rounded-md border border-zinc-300 bg-transparent px-3 py-2 outline-none focus:border-zinc-500 dark:border-zinc-700"
+        <div className="sticky bottom-0 mt-4 space-y-2 bg-background py-2">
+          <TalkButton
+            onRecorded={sendRecording}
+            disabled={pending !== null || uploading}
           />
-          <button
-            onClick={send}
-            disabled={pending !== null}
-            className="self-end rounded-md bg-zinc-900 px-4 py-2 font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Send
-          </button>
+          {uploading && (
+            <p className="text-sm text-zinc-500">Sending recording…</p>
+          )}
+          {audioInfo && <p className="text-sm text-zinc-500">{audioInfo}</p>}
+          <div className="flex gap-2">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKeyDown}
+              disabled={pending !== null}
+              maxLength={4000}
+              rows={3}
+              placeholder="Type your answer… (Enter to send, Shift+Enter for a new line)"
+              className="flex-1 resize-none rounded-md border border-zinc-300 bg-transparent px-3 py-2 outline-none focus:border-zinc-500 dark:border-zinc-700"
+            />
+            <button
+              onClick={send}
+              disabled={pending !== null}
+              className="self-end rounded-md bg-zinc-900 px-4 py-2 font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+            >
+              Send
+            </button>
+          </div>
         </div>
       )}
     </main>
   );
 }
 
-function Bubble({ turn, faded = false }: { turn: Pick<Turn, "speaker" | "text">; faded?: boolean }) {
+function Bubble({
+  turn,
+  faded = false,
+}: {
+  turn: Pick<Turn, "speaker" | "text">;
+  faded?: boolean;
+}) {
   const mine = turn.speaker === "candidate";
   return (
     <li className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <p
         className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 ${
-          mine ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "bg-zinc-100 dark:bg-zinc-800"
+          mine
+            ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+            : "bg-zinc-100 dark:bg-zinc-800"
         } ${faded ? "opacity-60" : ""}`}
       >
         {turn.text}

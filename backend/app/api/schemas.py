@@ -79,6 +79,13 @@ class AnswerOut(BaseModel):
     turns: list[TurnOut]
 
 
+class AudioReceived(BaseModel):
+    """Step 2 only: proof the recording arrived. Later steps answer with the new turns."""
+
+    size_bytes: int
+    content_type: str
+
+
 class UserOut(BaseModel):
     # from_attributes: build it straight from a User database object.
     model_config = ConfigDict(from_attributes=True)
