@@ -28,6 +28,57 @@ class TokenPair(BaseModel):
     token_type: str = "bearer"
 
 
+class TemplateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    slug: str
+    role: str
+    level: str
+    interview_type: str
+    topics: list[str]
+    max_main_questions: int
+
+
+class SessionCreate(BaseModel):
+    template_id: int
+
+
+class AnswerRequest(BaseModel):
+    # No min_length: empty and very short answers are the agent's job ("say a bit more").
+    # max_length stops a huge paste from filling the prompt and the database.
+    text: str = Field(max_length=4000)
+
+
+class TurnOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    turn_index: int
+    speaker: str
+    text: str
+    created_at: datetime
+
+
+class SessionOut(BaseModel):
+    """A session with its full transcript: what the chat page shows after a refresh."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    template_id: int
+    status: str
+    started_at: datetime
+    ended_at: datetime | None
+    turns: list[TurnOut]
+
+
+class AnswerOut(BaseModel):
+    """Only the new turns (the answer as saved + the reply), so the chat can append them."""
+
+    status: str
+    turns: list[TurnOut]
+
+
 class UserOut(BaseModel):
     # from_attributes: build it straight from a User database object.
     model_config = ConfigDict(from_attributes=True)

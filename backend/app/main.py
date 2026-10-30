@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import auth, health
+from app.api import auth, health, sessions, templates
 from app.core.config import get_settings
 
 
@@ -20,3 +20,5 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="AI Mock Interview Coach", lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(templates.router)
+app.include_router(sessions.router)

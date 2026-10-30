@@ -7,12 +7,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, make_url, text
 from sqlalchemy.orm import Session
 
+from app.agent.interviewer import Interviewer
 from app.agent.schemas import InterviewState
 from app.agent.templates import new_state
+from app.api.deps import get_interviewer
 from app.core.config import get_settings
 from app.core.db import get_db
+from app.core.security import create_token
 from app.main import app
 from app.models import Base, InterviewTemplate, User
+from tests.fakes import FakeLLMClient
 
 TEST_DB_NAME = "ai_coach_test"
 
@@ -97,6 +101,24 @@ def template(db: Session) -> InterviewTemplate:
     db.add(template)
     db.flush()
     return template
+
+
+@pytest.fixture
+def auth_headers(user: User) -> dict[str, str]:
+    """Logged in as `user`, without going through /auth/login (and its slow Argon2 hash)."""
+    return {"Authorization": f"Bearer {create_token(user.id, 'access')}"}
+
+
+@pytest.fixture
+def fake_llm(client: TestClient) -> FakeLLMClient:
+    """Every endpoint's interviewer uses this fake instead of Gemini.
+
+    Starts with an empty script: add decisions in the test with fake_llm.script.extend(...).
+    Depends on `client`, so its override is cleared together with get_db's after the test.
+    """
+    fake = FakeLLMClient([])
+    app.dependency_overrides[get_interviewer] = lambda: Interviewer(fake)
+    return fake
 
 
 @pytest.fixture
