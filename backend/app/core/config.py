@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Short access tokens limit the damage if one leaks; the refresh token gets new ones.
     access_token_minutes: int = 15
     refresh_token_days: int = 7
+    # Web pages (origins) that may call this API from a browser. Production sets its own,
+    # as JSON in the env var: CORS_ORIGINS='["https://coach.example.com"]'
+    cors_origins: list[str] = ["http://localhost:3000"]
 
 
 @lru_cache

@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import DB, CurrentUser, InterviewerDep
 from app.api.schemas import AnswerOut, AnswerRequest, SessionCreate, SessionOut, TurnOut
