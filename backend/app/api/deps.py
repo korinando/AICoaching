@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import TokenError, decode_token
 from app.models import User
+from app.speech.storage import AudioStorage, S3AudioStorage
 
 # Reads the "Authorization: Bearer <token>" header. auto_error=False so we send our own
 # 401 below instead of FastAPI's default 403. Also adds the "Authorize" button in /docs.
@@ -61,3 +62,18 @@ def get_interviewer() -> Interviewer:
 
 
 InterviewerDep = Annotated[Interviewer, Depends(get_interviewer)]
+
+
+@lru_cache
+def get_audio_storage() -> AudioStorage:
+    """One storage client for the whole server, created on first use. Tests use a fake."""
+    settings = get_settings()
+    return S3AudioStorage(
+        endpoint_url=settings.s3_endpoint_url,
+        access_key=settings.s3_access_key.get_secret_value(),
+        secret_key=settings.s3_secret_key.get_secret_value(),
+        bucket=settings.s3_bucket,
+    )
+
+
+AudioStorageDep = Annotated[AudioStorage, Depends(get_audio_storage)]

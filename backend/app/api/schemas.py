@@ -86,6 +86,7 @@ class AudioReceived(BaseModel):
     content_type: str
     duration_seconds: float  # measured by decoding the audio, not trusted from the browser
     wav_bytes: int  # size after converting to 16 kHz mono WAV
+    audio_key: str  # where the WAV is stored; Step 5 saves it in turns.audio_url
 
 
 class UserOut(BaseModel):

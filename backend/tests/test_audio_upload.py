@@ -1,17 +1,31 @@
-"""POST /sessions/{id}/audio: receiving and decoding a recording (Week 3 Steps 2-3)."""
+"""POST /sessions/{id}/audio: receiving, decoding and storing a recording (Week 3 Steps 2-4)."""
+
+import io
+import wave
 
 import pytest
 
 from app.api import sessions as sessions_api
+from app.api.deps import get_audio_storage
 from app.core.security import create_token
+from app.main import app
 from app.models import InterviewSession, User
-from tests.fakes import decision
+from app.speech.storage import StorageError
+from tests.fakes import FakeAudioStorage, decision
 
 BROWSER_TYPES = {
     "webm": "audio/webm;codecs=opus",  # Chrome
     "mp4": "audio/mp4",  # Safari
     "ogg": "audio/ogg;codecs=opus",  # Firefox (sometimes)
 }
+
+
+@pytest.fixture(autouse=True)
+def storage(client) -> FakeAudioStorage:
+    """Every test here stores into a dict. test_storage.py covers the real server."""
+    fake = FakeAudioStorage()
+    app.dependency_overrides[get_audio_storage] = lambda: fake
+    return fake
 
 
 @pytest.fixture
@@ -43,6 +57,41 @@ def test_every_browser_format_is_decoded(client, auth_headers, session_id, audio
     assert body["duration_seconds"] == pytest.approx(2.0, abs=0.1)
     # 2 s x 16 000 samples x 2 bytes + a 44-byte header = about 64 KB, whatever came in
     assert body["wav_bytes"] == pytest.approx(64_044, abs=3_200)
+
+
+def test_recording_is_stored_as_wav_under_the_returned_key(
+    client, auth_headers, session_id, audio_samples, storage
+):
+    response = upload(client, session_id, auth_headers, audio_samples["webm"])
+
+    key = response.json()["audio_key"]
+    assert key.startswith(f"sessions/{session_id}/") and key.endswith(".wav")
+    data, content_type = storage.files[key]
+    assert content_type == "audio/wav"
+    with wave.open(io.BytesIO(data)) as w:  # really the converted file, not the original
+        assert w.getframerate() == 16_000
+
+
+def test_two_uploads_never_share_a_key(client, auth_headers, session_id, audio_samples, storage):
+    upload(client, session_id, auth_headers, audio_samples["webm"])
+    upload(client, session_id, auth_headers, audio_samples["webm"])
+
+    assert len(storage.files) == 2
+
+
+def test_rejected_uploads_are_not_stored(client, auth_headers, session_id, audio_samples, storage):
+    upload(client, session_id, auth_headers, audio_samples["short_webm"])
+    upload(client, session_id, auth_headers, b"not really audio" * 100)
+
+    assert storage.files == {}
+
+
+def test_storage_down_is_503(client, auth_headers, session_id, audio_samples, storage):
+    storage.error = StorageError("connection refused")
+
+    response = upload(client, session_id, auth_headers, audio_samples["webm"])
+
+    assert response.status_code == 503
 
 
 def test_wrong_content_type_is_415(client, auth_headers, session_id, audio_samples):

@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # Web pages (origins) that may call this API from a browser. Production sets its own,
     # as JSON in the env var: CORS_ORIGINS='["https://coach.example.com"]'
     cors_origins: list[str] = ["http://localhost:3000"]
+    # Recordings storage: anything that speaks the S3 API (SeaweedFS here, real S3 later).
+    s3_access_key: SecretStr
+    s3_secret_key: SecretStr
+    s3_endpoint_url: str = "http://localhost:8333"
+    s3_bucket: str = "ai-coach-recordings"
 
 
 @lru_cache

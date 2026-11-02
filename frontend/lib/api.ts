@@ -195,6 +195,7 @@ export type AudioReceived = {
   content_type: string;
   duration_seconds: number; // measured by the server after decoding with ffmpeg
   wav_bytes: number; // size after converting to 16 kHz mono WAV
+  audio_key: string; // where the WAV is stored
 };
 
 /** Week 3 Step 2: send a recording; the backend only confirms what it received for now. */

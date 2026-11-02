@@ -7,6 +7,8 @@ GOOD_ENV = {
     "DATABASE_URL": "postgresql+psycopg://user:pw@localhost:5433/test",
     "JWT_SECRET": "x" * 32,
     "GEMINI_API_KEY": "fake-key",
+    "S3_ACCESS_KEY": "fake-access",
+    "S3_SECRET_KEY": "fake-secret",
 }
 
 
@@ -46,4 +48,5 @@ def test_short_jwt_secret_is_rejected(env):
 def test_secrets_are_hidden_when_printed(env):
     settings = load()
     assert "fake-key" not in repr(settings)
+    assert "fake-secret" not in repr(settings)
     assert settings.gemini_api_key.get_secret_value() == "fake-key"

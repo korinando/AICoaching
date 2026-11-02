@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DB, CurrentUser, InterviewerDep
+from app.api.deps import DB, AudioStorageDep, CurrentUser, InterviewerDep
 from app.api.schemas import (
     AnswerOut,
     AnswerRequest,
@@ -13,6 +13,7 @@ from app.api.schemas import (
 from app.models import InterviewSession, InterviewTemplate, User
 from app.services.interviews import InterviewClosedError, start_interview, submit_answer
 from app.speech.audio import AudioError, normalize_audio, wav_duration_seconds
+from app.speech.storage import StorageError, new_audio_key
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -82,7 +83,9 @@ def answer(
 
 
 @router.post("/{session_id}/audio")
-def upload_audio(session_id: int, audio: UploadFile, db: DB, user: CurrentUser) -> AudioReceived:
+def upload_audio(
+    session_id: int, audio: UploadFile, db: DB, user: CurrentUser, storage: AudioStorageDep
+) -> AudioReceived:
     """Receive one spoken answer as a file (multipart/form-data, field name "audio").
 
     Week 3 Step 2: only checks and measures the upload. Steps 3-6 add ffmpeg, storage,
@@ -117,9 +120,21 @@ def upload_audio(session_id: int, audio: UploadFile, db: DB, user: CurrentUser) 
     if duration < MIN_AUDIO_SECONDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Recording is too short")
 
+    # Saved after every check, so rejected uploads never take up storage. The WAV rather
+    # than the original: bigger, but one format that every browser can play back.
+    key = new_audio_key(session.id)
+    try:
+        storage.save(key, wav, "audio/wav")
+    except StorageError:
+        # 503: the request was fine, a service behind the API is down. Trying again may work.
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Could not save the recording. Try again."
+        ) from None
+
     return AudioReceived(
         size_bytes=len(data),
         content_type=content_type,
         duration_seconds=round(duration, 2),
         wav_bytes=len(wav),
+        audio_key=key,
     )

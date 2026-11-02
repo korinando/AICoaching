@@ -21,6 +21,19 @@ class FakeLLMClient:
         return result
 
 
+class FakeAudioStorage:
+    """AudioStorage for tests: keeps files in a dict, or fails on demand."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, tuple[bytes, str]] = {}
+        self.error: Exception | None = None
+
+    def save(self, key: str, data: bytes, content_type: str) -> None:
+        if self.error:
+            raise self.error
+        self.files[key] = (data, content_type)
+
+
 def decision(action: Action, text: str = "Scripted reply.") -> AgentDecision:
     """A scripted AgentDecision for FakeLLMClient."""
     return AgentDecision(action=action, reasoning="test", text=text)
