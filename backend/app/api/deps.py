@@ -1,6 +1,7 @@
 """Shared FastAPI dependencies: things an endpoint asks for in its parameters."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -15,6 +16,9 @@ from app.core.security import TokenError, decode_token
 from app.models import User
 from app.speech.storage import AudioStorage, S3AudioStorage
 from app.speech.stt import SpeechToText, WhisperSpeechToText
+from app.speech.tts import PiperTextToSpeech, TextToSpeech
+
+VOICES_DIR = Path(__file__).resolve().parents[2] / "voices"  # backend/voices
 
 # Reads the "Authorization: Bearer <token>" header. auto_error=False so we send our own
 # 401 below instead of FastAPI's default 403. Also adds the "Authorize" button in /docs.
@@ -87,3 +91,12 @@ def get_speech_to_text() -> SpeechToText:
 
 
 SpeechToTextDep = Annotated[SpeechToText, Depends(get_speech_to_text)]
+
+
+@lru_cache
+def get_text_to_speech() -> TextToSpeech:
+    """One Piper voice for the whole server: loading it takes seconds. Tests use a fake."""
+    return PiperTextToSpeech(VOICES_DIR / f"{get_settings().piper_voice}.onnx")
+
+
+TextToSpeechDep = Annotated[TextToSpeech, Depends(get_text_to_speech)]

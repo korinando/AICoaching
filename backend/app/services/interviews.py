@@ -5,6 +5,8 @@ from the session row, lets the Interviewer take one step, and saves the result. 
 is kept in memory between requests, so a server restart loses nothing.
 """
 
+import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
@@ -12,6 +14,10 @@ from sqlalchemy.orm import Session
 from app.agent.interviewer import Interviewer
 from app.agent.schemas import InterviewState
 from app.models import InterviewSession, InterviewTemplate, Turn, User
+from app.speech.storage import AudioStorage, StorageError, new_audio_key
+from app.speech.tts import TextToSpeech, TextToSpeechError
+
+logger = logging.getLogger(__name__)
 
 
 class InterviewClosedError(Exception):
@@ -62,6 +68,31 @@ def _save(
     if state.finished:
         session.status = "completed"
         session.ended_at = datetime.now(UTC)
+
+
+def speak_turns(
+    db: Session,
+    session: InterviewSession,
+    turns: Iterable[Turn],
+    tts: TextToSpeech,
+    storage: AudioStorage,
+) -> None:
+    """Give the interviewer's new turns a voice. Runs after the answer is committed.
+
+    Audio is a bonus on top of the text: if the voice or the storage fails, the interview
+    carries on with that reply as text only (has_audio is False), and nothing is lost.
+    """
+    for turn in turns:
+        if turn.speaker != "interviewer":
+            continue
+        try:
+            key = new_audio_key(session.id)
+            storage.save(key, tts.synthesize(turn.text), "audio/wav")
+        except (TextToSpeechError, StorageError) as e:
+            logger.warning("Session %s turn %s has no audio: %s", session.id, turn.turn_index, e)
+        else:
+            turn.audio_url = key
+    db.commit()
 
 
 def start_interview(

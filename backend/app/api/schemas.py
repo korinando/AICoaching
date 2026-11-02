@@ -59,6 +59,7 @@ class TurnOut(BaseModel):
     speaker: str
     text: str
     created_at: datetime
+    has_audio: bool  # True: GET /sessions/{id}/turns/{turn_index}/audio plays it
 
 
 class SessionOut(BaseModel):

@@ -23,6 +23,9 @@ class AudioStorage(Protocol):
     def save(self, key: str, data: bytes, content_type: str) -> None:
         """Store the file, or raise StorageError."""
 
+    def load(self, key: str) -> bytes:
+        """The stored file, or raise StorageError."""
+
 
 class S3AudioStorage:
     """AudioStorage for any S3-compatible service. Moving to real S3 only changes settings."""
@@ -50,6 +53,12 @@ class S3AudioStorage:
     def save(self, key: str, data: bytes, content_type: str) -> None:
         try:
             self.client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type)
+        except (BotoCoreError, ClientError) as e:
+            raise StorageError(f"{type(e).__name__}: {e}") from e
+
+    def load(self, key: str) -> bytes:
+        try:
+            return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
         except (BotoCoreError, ClientError) as e:
             raise StorageError(f"{type(e).__name__}: {e}") from e
 

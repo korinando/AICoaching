@@ -1,8 +1,16 @@
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, Response, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.agent.interviewer import Interviewer
-from app.api.deps import DB, AudioStorageDep, CurrentUser, InterviewerDep, SpeechToTextDep
+from app.api.deps import (
+    DB,
+    AudioStorageDep,
+    CurrentUser,
+    InterviewerDep,
+    SpeechToTextDep,
+    TextToSpeechDep,
+)
 from app.api.schemas import (
     MAX_ANSWER_CHARS,
     AnswerOut,
@@ -11,11 +19,17 @@ from app.api.schemas import (
     SessionOut,
     TurnOut,
 )
-from app.models import InterviewSession, InterviewTemplate, User
-from app.services.interviews import InterviewClosedError, start_interview, submit_answer
+from app.models import InterviewSession, InterviewTemplate, Turn, User
+from app.services.interviews import (
+    InterviewClosedError,
+    speak_turns,
+    start_interview,
+    submit_answer,
+)
 from app.speech.audio import AudioError, normalize_audio, wav_duration_seconds
-from app.speech.storage import StorageError, new_audio_key
+from app.speech.storage import AudioStorage, StorageError, new_audio_key
 from app.speech.stt import SpeechToTextError
+from app.speech.tts import TextToSpeech
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -41,13 +55,19 @@ def _get_own_session(db: DB, session_id: int, user: User) -> InterviewSession:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_session(
-    body: SessionCreate, db: DB, user: CurrentUser, interviewer: InterviewerDep
+    body: SessionCreate,
+    db: DB,
+    user: CurrentUser,
+    interviewer: InterviewerDep,
+    tts: TextToSpeechDep,
+    storage: AudioStorageDep,
 ) -> SessionOut:
     """Start an interview: the response already contains the opening question."""
     template = db.get(InterviewTemplate, body.template_id)
     if template is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
     session = start_interview(db, user, template, interviewer)
+    speak_turns(db, session, session.turns, tts, storage)
     return SessionOut.model_validate(session)
 
 
@@ -59,14 +79,20 @@ def get_session(session_id: int, db: DB, user: CurrentUser) -> SessionOut:
 
 @router.post("/{session_id}/answer")
 def answer(
-    session_id: int, body: AnswerRequest, db: DB, user: CurrentUser, interviewer: InterviewerDep
+    session_id: int,
+    body: AnswerRequest,
+    db: DB,
+    user: CurrentUser,
+    interviewer: InterviewerDep,
+    tts: TextToSpeechDep,
+    storage: AudioStorageDep,
 ) -> AnswerOut:
     """Send one answer, get the interviewer's reply.
 
     Temporary: Week 4 replaces this with a WebSocket for voice streaming.
     """
     session = _get_own_session(db, session_id, user)
-    return _answer(db, session, body.text, interviewer)
+    return _answer(db, session, body.text, interviewer, tts, storage)
 
 
 def _answer(
@@ -74,9 +100,11 @@ def _answer(
     session: InterviewSession,
     text: str,
     interviewer: Interviewer,
+    tts: TextToSpeech,
+    storage: AudioStorage,
     audio_key: str | None = None,
 ) -> AnswerOut:
-    """Typed and spoken answers both end here: run the agent, save, return the new turns."""
+    """Typed and spoken answers both end here: run the agent, save, speak, return new turns."""
     before = len(session.turns)
     try:
         submit_answer(db, session, text, interviewer, audio_key)
@@ -92,7 +120,29 @@ def _answer(
             status.HTTP_409_CONFLICT, "Another answer was saved first. Reload the interview."
         ) from None
     new_turns = session.turns[before:]
+    # After the commit above: the answer is safe even if speaking the reply goes wrong.
+    speak_turns(db, session, new_turns, tts, storage)
     return AnswerOut(status=session.status, turns=[TurnOut.model_validate(t) for t in new_turns])
+
+
+@router.get("/{session_id}/turns/{turn_index}/audio")
+def get_turn_audio(
+    session_id: int, turn_index: int, db: DB, user: CurrentUser, storage: AudioStorageDep
+) -> Response:
+    """The recording or spoken reply of one turn, through the API and not a public link, so
+    the same login and ownership rules protect someone's voice as their transcript."""
+    session = _get_own_session(db, session_id, user)
+    turn = db.scalar(
+        select(Turn).where(Turn.session_id == session.id, Turn.turn_index == turn_index)
+    )
+    if turn is None or turn.audio_url is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No audio for this turn")
+    try:
+        return Response(content=storage.load(turn.audio_url), media_type="audio/wav")
+    except StorageError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Could not load the audio. Try again."
+        ) from None
 
 
 @router.post("/{session_id}/audio")
@@ -104,11 +154,11 @@ def upload_audio(
     interviewer: InterviewerDep,
     storage: AudioStorageDep,
     speech_to_text: SpeechToTextDep,
+    tts: TextToSpeechDep,
 ) -> AnswerOut:
     """A spoken answer as a file (multipart/form-data, field name "audio").
 
-    Decode -> transcribe -> store -> the same interviewer as typed answers. Step 6 adds the
-    interviewer's spoken reply.
+    Decode -> transcribe -> store -> the same interviewer as typed answers -> spoken reply.
     """
     session = _get_own_session(db, session_id, user)
     if session.status != "in_progress":
@@ -164,4 +214,4 @@ def upload_audio(
         ) from None
 
     # The same limit as typed answers: 10 MB of audio could transcribe to a very long text.
-    return _answer(db, session, transcript[:MAX_ANSWER_CHARS], interviewer, key)
+    return _answer(db, session, transcript[:MAX_ANSWER_CHARS], interviewer, tts, storage, key)

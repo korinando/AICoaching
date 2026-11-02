@@ -33,6 +33,25 @@ class FakeAudioStorage:
             raise self.error
         self.files[key] = (data, content_type)
 
+    def load(self, key: str) -> bytes:
+        if self.error:
+            raise self.error
+        return self.files[key][0]
+
+
+class FakeTextToSpeech:
+    """TextToSpeech for tests: "speaks" by returning the text as bytes, or fails on demand."""
+
+    def __init__(self) -> None:
+        self.error: Exception | None = None
+        self.calls: list[str] = []
+
+    def synthesize(self, text: str) -> bytes:
+        self.calls.append(text)
+        if self.error:
+            raise self.error
+        return f"spoken: {text}".encode()
+
 
 class FakeSpeechToText:
     """SpeechToText for tests: returns a set text, records what it was given, or fails."""

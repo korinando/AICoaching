@@ -37,3 +37,8 @@ class Turn(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     session: Mapped["InterviewSession"] = relationship(back_populates="turns")
+
+    @property
+    def has_audio(self) -> bool:
+        """What the API tells the browser. The storage key itself stays private."""
+        return self.audio_url is not None

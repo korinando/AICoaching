@@ -36,6 +36,23 @@ def test_saved_file_can_be_read_back():
         storage.client.delete_object(Bucket=TEST_BUCKET, Key=key)
 
 
+def test_load_returns_what_was_saved():
+    storage = make_storage()
+    key = f"tests/{uuid4().hex}.wav"
+
+    storage.save(key, b"some audio", "audio/wav")
+
+    try:
+        assert storage.load(key) == b"some audio"
+    finally:
+        storage.client.delete_object(Bucket=TEST_BUCKET, Key=key)
+
+
+def test_loading_a_missing_file_is_a_storage_error():
+    with pytest.raises(StorageError):
+        make_storage().load(f"tests/{uuid4().hex}.wav")
+
+
 def test_wrong_secret_key_is_refused():
     """Without this, anything on this PC could write to the storage."""
     storage = make_storage(secret_key="not-the-real-secret")

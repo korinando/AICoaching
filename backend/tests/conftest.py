@@ -10,14 +10,14 @@ from sqlalchemy.orm import Session
 from app.agent.interviewer import Interviewer
 from app.agent.schemas import InterviewState
 from app.agent.templates import new_state
-from app.api.deps import get_interviewer
+from app.api.deps import get_audio_storage, get_interviewer, get_text_to_speech
 from app.core.db import get_db
 from app.core.security import create_token
 from app.main import app
 from app.models import Base, InterviewTemplate, User
 from tests.audio_samples import make_samples
 from tests.db_utils import scratch_database_url
-from tests.fakes import FakeLLMClient
+from tests.fakes import FakeAudioStorage, FakeLLMClient, FakeTextToSpeech
 
 TEST_DB_NAME = "ai_coach_test"
 
@@ -124,8 +124,22 @@ def fake_llm(client: TestClient) -> FakeLLMClient:
 
 
 @pytest.fixture
-def client(db: Session) -> Iterator[TestClient]:
-    """The app, with every endpoint's get_db replaced by the test session above."""
+def storage() -> FakeAudioStorage:
+    """Stored files go into a dict. test_storage.py covers the real server."""
+    return FakeAudioStorage()
+
+
+@pytest.fixture
+def tts() -> FakeTextToSpeech:
+    """A fake voice, so API tests never load Piper. test_tts.py covers failures of the real one."""
+    return FakeTextToSpeech()
+
+
+@pytest.fixture
+def client(db: Session, storage: FakeAudioStorage, tts: FakeTextToSpeech) -> Iterator[TestClient]:
+    """The app, with the test database and fake storage and voice in every endpoint."""
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_audio_storage] = lambda: storage
+    app.dependency_overrides[get_text_to_speech] = lambda: tts
     yield TestClient(app)
     app.dependency_overrides.clear()

@@ -12,6 +12,7 @@ import {
 
 import { TalkButton } from "@/components/TalkButton";
 import {
+  type AnswerResult,
   ApiError,
   getSession,
   sendAnswer,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/api";
 import type { Recording } from "@/lib/useRecorder";
 import { useRequireLogin } from "@/lib/useRequireLogin";
+import { useTurnAudio } from "@/lib/useTurnAudio";
 
 /** The [id] in the URL is only known when someone opens the page, not at build time.
  * next.config has cacheComponents on, so Next.js prerenders pages during the build; reading
@@ -45,13 +47,20 @@ function Interview() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const { play, stop } = useTurnAudio();
 
   // Load the whole transcript from the server. This is what makes a page refresh safe:
   // nothing lives only in the browser.
   useEffect(() => {
     if (!ready) return;
     getSession(sessionId)
-      .then(setSession)
+      .then((loaded) => {
+        setSession(loaded);
+        // A brand-new interview: speak the opening question. Later on, a refresh stays quiet.
+        if (loaded.turns.length === 1 && loaded.turns[0].has_audio) {
+          void play(sessionId, 0);
+        }
+      })
       .catch((e) =>
         setError(
           e instanceof ApiError && e.status === 404
@@ -59,12 +68,23 @@ function Interview() {
             : String(e.message),
         ),
       );
-  }, [ready, sessionId]);
+  }, [ready, sessionId, play]);
 
   // Keep the newest message in view.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.turns.length, pending]);
+
+  /** Add the new turns to the chat and speak the interviewer's reply. */
+  function showResult(current: Session, result: AnswerResult) {
+    setSession({
+      ...current,
+      status: result.status,
+      turns: [...current.turns, ...result.turns],
+    });
+    const reply = result.turns.at(-1);
+    if (reply?.has_audio) void play(current.id, reply.turn_index);
+  }
 
   async function send() {
     const text = draft;
@@ -73,13 +93,8 @@ function Interview() {
     setDraft("");
     setError(null);
     try {
-      const result = await sendAnswer(session.id, text);
-      // The server returns the answer as saved plus the reply: append both.
-      setSession({
-        ...session,
-        status: result.status,
-        turns: [...session.turns, ...result.turns],
-      });
+      // The server returns the answer as saved plus the reply.
+      showResult(session, await sendAnswer(session.id, text));
     } catch (e) {
       setDraft(text); // give the text back so nothing typed is lost
       setError(e instanceof Error ? e.message : "Could not send the answer");
@@ -96,12 +111,7 @@ function Interview() {
     setUploading(true);
     setError(null);
     try {
-      const result = await uploadAudio(session.id, recording.blob);
-      setSession({
-        ...session,
-        status: result.status,
-        turns: [...session.turns, ...result.turns],
-      });
+      showResult(session, await uploadAudio(session.id, recording.blob));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not send the recording");
     } finally {
@@ -138,7 +148,15 @@ function Interview() {
 
       <ol className="flex-1 space-y-3">
         {session.turns.map((turn) => (
-          <Bubble key={turn.turn_index} turn={turn} />
+          <Bubble
+            key={turn.turn_index}
+            turn={turn}
+            onPlay={
+              turn.has_audio
+                ? () => void play(session.id, turn.turn_index)
+                : undefined
+            }
+          />
         ))}
         {pending !== null && (
           <>
@@ -162,6 +180,7 @@ function Interview() {
         <div className="sticky bottom-0 mt-4 space-y-2 bg-background py-2">
           <TalkButton
             onRecorded={sendRecording}
+            onPress={stop} // don't record the interviewer's voice through the speakers
             disabled={pending !== null || uploading}
           />
           {uploading && (
@@ -195,13 +214,15 @@ function Interview() {
 function Bubble({
   turn,
   faded = false,
+  onPlay,
 }: {
   turn: Pick<Turn, "speaker" | "text">;
   faded?: boolean;
+  onPlay?: () => void;
 }) {
   const mine = turn.speaker === "candidate";
   return (
-    <li className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+    <li className={`flex items-center gap-1 ${mine ? "flex-row-reverse" : ""}`}>
       <p
         className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 ${
           mine
@@ -211,6 +232,16 @@ function Bubble({
       >
         {turn.text}
       </p>
+      {onPlay && (
+        <button
+          type="button"
+          onClick={onPlay}
+          aria-label="Play this message"
+          className="rounded p-1 text-sm opacity-60 hover:opacity-100"
+        >
+          🔊
+        </button>
+      )}
     </li>
   );
 }

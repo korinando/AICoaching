@@ -28,6 +28,7 @@ export type Turn = {
   speaker: "interviewer" | "candidate";
   text: string;
   created_at: string;
+  has_audio: boolean; // true: getTurnAudio can play it
 };
 
 export type SessionStatus = "in_progress" | "completed" | "abandoned";
@@ -116,7 +117,7 @@ async function refreshTokens(): Promise<boolean> {
 
 async function apiFetch<T>(
   path: string,
-  options: { method?: string; body?: unknown } = {},
+  options: { method?: string; body?: unknown; blob?: boolean } = {},
 ): Promise<T> {
   // A file upload (FormData) is sent as it is, WITHOUT a Content-Type header: the browser then
   // writes "multipart/form-data; boundary=..." itself, and the boundary (the marker between
@@ -146,7 +147,7 @@ async function apiFetch<T>(
     if (await refreshing) response = await send();
   }
   if (!response.ok) throw await errorFrom(response);
-  return response.json() as Promise<T>;
+  return (options.blob ? response.blob() : response.json()) as Promise<T>;
 }
 
 // ---- One function per endpoint -------------------------------------------------------------
@@ -188,6 +189,13 @@ export const sendAnswer = (id: number, text: string) =>
   apiFetch<AnswerResult>(`/sessions/${id}/answer`, {
     method: "POST",
     body: { text },
+  });
+
+/** The audio of one turn, as a file in memory. Fetched here rather than with <audio src>,
+ * because a plain src can't send the login token. */
+export const getTurnAudio = (sessionId: number, turnIndex: number) =>
+  apiFetch<Blob>(`/sessions/${sessionId}/turns/${turnIndex}/audio`, {
+    blob: true,
   });
 
 /** A spoken answer: the server transcribes it and answers like sendAnswer. */

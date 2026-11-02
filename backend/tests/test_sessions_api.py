@@ -44,6 +44,7 @@ def test_create_session_returns_opening_question(client, auth_headers, fake_llm,
             "speaker": "interviewer",
             "text": OPENING,
             "created_at": body["turns"][0]["created_at"],
+            "has_audio": True,
         }
     ]
 

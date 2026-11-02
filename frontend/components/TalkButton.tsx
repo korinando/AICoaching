@@ -10,9 +10,11 @@ const MIN_RECORDING_MS = 1000; // the plan: reject recordings shorter than about
  * The same press/release handling as the mic test page, packaged for reuse. */
 export function TalkButton({
   onRecorded,
+  onPress,
   disabled = false,
 }: {
   onRecorded: (recording: Recording) => void;
+  onPress?: () => void;
   disabled?: boolean;
 }) {
   const { isRecording, error, start, stop } = useRecorder();
@@ -22,6 +24,7 @@ export function TalkButton({
     if (disabled) return;
     e.currentTarget.setPointerCapture(e.pointerId); // release outside the button still counts
     setMessage(null);
+    onPress?.();
     void start(); // "void": start on purpose without waiting; release calls stop()
   }
 

@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     s3_bucket: str = "ai-coach-recordings"
     # base.en: English only, about 140 MB. Bigger (small.en) is more accurate but slower.
     whisper_model: str = "base.en"
+    # A file in backend/voices/, downloaded with: uv run python -m piper.download_voices
+    piper_voice: str = "en_US-lessac-medium"
 
 
 @lru_cache

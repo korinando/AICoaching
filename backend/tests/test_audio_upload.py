@@ -8,14 +8,14 @@ from sqlalchemy import select
 
 from app.agent.interviewer import REPEAT_TEXT
 from app.api import sessions as sessions_api
-from app.api.deps import get_audio_storage, get_speech_to_text
+from app.api.deps import get_speech_to_text
 from app.api.schemas import MAX_ANSWER_CHARS
 from app.core.security import create_token
 from app.main import app
 from app.models import InterviewSession, Turn, User
 from app.speech.storage import StorageError
 from app.speech.stt import SpeechToTextError
-from tests.fakes import ANSWER, FakeAudioStorage, FakeSpeechToText, decision
+from tests.fakes import ANSWER, FakeSpeechToText, decision
 
 BROWSER_TYPES = {
     "webm": "audio/webm;codecs=opus",  # Chrome
@@ -23,14 +23,6 @@ BROWSER_TYPES = {
     "ogg": "audio/ogg;codecs=opus",  # Firefox (sometimes)
 }
 REPLY = "Why would you add it?"
-
-
-@pytest.fixture(autouse=True)
-def storage(client) -> FakeAudioStorage:
-    """Every test here stores into a dict. test_storage.py covers the real server."""
-    fake = FakeAudioStorage()
-    app.dependency_overrides[get_audio_storage] = lambda: fake
-    return fake
 
 
 @pytest.fixture(autouse=True)
@@ -42,9 +34,10 @@ def speech(client) -> FakeSpeechToText:
 
 
 @pytest.fixture
-def session_id(client, auth_headers, fake_llm, template) -> int:
+def session_id(client, auth_headers, fake_llm, template, storage) -> int:
     fake_llm.script.append(decision("next_question", text="Welcome! What is REST?"))
     response = client.post("/sessions", json={"template_id": template.id}, headers=auth_headers)
+    storage.files.clear()  # forget the opening question's audio: tests count what they cause
     return response.json()["id"]
 
 
@@ -94,9 +87,8 @@ def test_recording_key_is_saved_on_the_candidates_turn(
 
     upload(client, session_id, auth_headers, audio_samples["webm"])
 
-    opening, answer, reply = turns_in_db(db, session_id)
+    _opening, answer, _reply = turns_in_db(db, session_id)
     assert answer.audio_url.startswith(f"sessions/{session_id}/")
-    assert opening.audio_url is None and reply.audio_url is None
     data, content_type = storage.files[answer.audio_url]
     assert content_type == "audio/wav"
     with wave.open(io.BytesIO(data)) as w:  # really the converted file, not the original
@@ -111,7 +103,7 @@ def test_two_uploads_never_share_a_key(
     upload(client, session_id, auth_headers, audio_samples["webm"])
     upload(client, session_id, auth_headers, audio_samples["webm"])
 
-    assert len(storage.files) == 2
+    assert len(storage.files) == 4  # 2 recordings + 2 spoken replies, nothing overwritten
 
 
 def test_typed_answers_have_no_recording(client, db, auth_headers, session_id, fake_llm):
@@ -119,7 +111,8 @@ def test_typed_answers_have_no_recording(client, db, auth_headers, session_id, f
 
     client.post(f"/sessions/{session_id}/answer", json={"text": ANSWER}, headers=auth_headers)
 
-    assert all(turn.audio_url is None for turn in turns_in_db(db, session_id))
+    _opening, answer, _reply = turns_in_db(db, session_id)
+    assert answer.audio_url is None
 
 
 # --- What the transcript contains --------------------------------------------------------------
