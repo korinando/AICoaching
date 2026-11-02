@@ -5,6 +5,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+MAX_ANSWER_CHARS = 4000
+
 
 class RegisterRequest(BaseModel):
     email: EmailStr  # format checked by email-validator: "abc" is rejected with a 422
@@ -47,7 +49,7 @@ class SessionCreate(BaseModel):
 class AnswerRequest(BaseModel):
     # No min_length: empty and very short answers are the agent's job ("say a bit more").
     # max_length stops a huge paste from filling the prompt and the database.
-    text: str = Field(max_length=4000)
+    text: str = Field(max_length=MAX_ANSWER_CHARS)
 
 
 class TurnOut(BaseModel):
@@ -77,16 +79,6 @@ class AnswerOut(BaseModel):
 
     status: str
     turns: list[TurnOut]
-
-
-class AudioReceived(BaseModel):
-    """Steps 2-3: proof the recording arrived and was decoded. Step 5 answers with turns."""
-
-    size_bytes: int
-    content_type: str
-    duration_seconds: float  # measured by decoding the audio, not trusted from the browser
-    wav_bytes: int  # size after converting to 16 kHz mono WAV
-    audio_key: str  # where the WAV is stored; Step 5 saves it in turns.audio_url
 
 
 class UserOut(BaseModel):

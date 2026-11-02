@@ -14,6 +14,7 @@ from app.core.db import get_db
 from app.core.security import TokenError, decode_token
 from app.models import User
 from app.speech.storage import AudioStorage, S3AudioStorage
+from app.speech.stt import SpeechToText, WhisperSpeechToText
 
 # Reads the "Authorization: Bearer <token>" header. auto_error=False so we send our own
 # 401 below instead of FastAPI's default 403. Also adds the "Authorize" button in /docs.
@@ -77,3 +78,12 @@ def get_audio_storage() -> AudioStorage:
 
 
 AudioStorageDep = Annotated[AudioStorage, Depends(get_audio_storage)]
+
+
+@lru_cache
+def get_speech_to_text() -> SpeechToText:
+    """One Whisper model for the whole server: loading it takes seconds. Tests use a fake."""
+    return WhisperSpeechToText(get_settings().whisper_model)
+
+
+SpeechToTextDep = Annotated[SpeechToText, Depends(get_speech_to_text)]

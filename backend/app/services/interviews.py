@@ -37,11 +37,25 @@ def load_state(session: InterviewSession) -> InterviewState:
     return InterviewState.model_validate(session.agent_state)
 
 
-def _save(session: InterviewSession, state: InterviewState, first_new: int) -> None:
+def _save(
+    session: InterviewSession,
+    state: InterviewState,
+    first_new: int,
+    audio_key: str | None = None,
+) -> None:
     """Write the agent's state and its new messages to the session. The only place that
-    writes both, so agent_state.history and the turns table can't drift apart."""
+    writes both, so agent_state.history and the turns table can't drift apart.
+
+    audio_key belongs to the first new message: the candidate's answer."""
     for index, message in enumerate(state.history[first_new:], start=first_new):
-        session.turns.append(Turn(turn_index=index, speaker=message.role, text=message.text))
+        session.turns.append(
+            Turn(
+                turn_index=index,
+                speaker=message.role,
+                text=message.text,
+                audio_url=audio_key if index == first_new else None,
+            )
+        )
     # A new dict, not an in-place change: SQLAlchemy only notices that a JSONB column changed
     # when the attribute is assigned. Mutating the old dict would silently not be saved.
     session.agent_state = state.model_dump(mode="json")
@@ -64,9 +78,16 @@ def start_interview(
 
 
 def submit_answer(
-    db: Session, session: InterviewSession, answer: str, interviewer: Interviewer
+    db: Session,
+    session: InterviewSession,
+    answer: str,
+    interviewer: Interviewer,
+    audio_key: str | None = None,
 ) -> str:
-    """Handle one candidate answer and return the interviewer's reply."""
+    """Handle one candidate answer and return the interviewer's reply.
+
+    audio_key: where the recording is stored, for a spoken answer; None for a typed one.
+    """
     if session.status != "in_progress":
         raise InterviewClosedError(f"Session {session.id} is {session.status}")
     state = load_state(session)
@@ -75,6 +96,6 @@ def submit_answer(
     # handle_answer adds 2 messages (answer + reply); saving from first_new catches both.
     # If two requests for one session race, both get the same turn_index and the unique
     # constraint (session_id, turn_index) from Step 3 rejects the second commit.
-    _save(session, state, first_new)
+    _save(session, state, first_new, audio_key)
     db.commit()
     return reply

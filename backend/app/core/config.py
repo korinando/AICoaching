@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     s3_secret_key: SecretStr
     s3_endpoint_url: str = "http://localhost:8333"
     s3_bucket: str = "ai-coach-recordings"
+    # base.en: English only, about 140 MB. Bigger (small.en) is more accurate but slower.
+    whisper_model: str = "base.en"
 
 
 @lru_cache

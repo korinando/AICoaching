@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DB, AudioStorageDep, CurrentUser, InterviewerDep
+from app.agent.interviewer import Interviewer
+from app.api.deps import DB, AudioStorageDep, CurrentUser, InterviewerDep, SpeechToTextDep
 from app.api.schemas import (
+    MAX_ANSWER_CHARS,
     AnswerOut,
     AnswerRequest,
-    AudioReceived,
     SessionCreate,
     SessionOut,
     TurnOut,
@@ -14,6 +15,7 @@ from app.models import InterviewSession, InterviewTemplate, User
 from app.services.interviews import InterviewClosedError, start_interview, submit_answer
 from app.speech.audio import AudioError, normalize_audio, wav_duration_seconds
 from app.speech.storage import StorageError, new_audio_key
+from app.speech.stt import SpeechToTextError
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -64,9 +66,20 @@ def answer(
     Temporary: Week 4 replaces this with a WebSocket for voice streaming.
     """
     session = _get_own_session(db, session_id, user)
+    return _answer(db, session, body.text, interviewer)
+
+
+def _answer(
+    db: DB,
+    session: InterviewSession,
+    text: str,
+    interviewer: Interviewer,
+    audio_key: str | None = None,
+) -> AnswerOut:
+    """Typed and spoken answers both end here: run the agent, save, return the new turns."""
     before = len(session.turns)
     try:
-        submit_answer(db, session, body.text, interviewer)
+        submit_answer(db, session, text, interviewer, audio_key)
     except InterviewClosedError:
         # 409 Conflict: the request is valid, but the session's state doesn't allow it.
         raise HTTPException(status.HTTP_409_CONFLICT, "Interview already finished") from None
@@ -84,12 +97,18 @@ def answer(
 
 @router.post("/{session_id}/audio")
 def upload_audio(
-    session_id: int, audio: UploadFile, db: DB, user: CurrentUser, storage: AudioStorageDep
-) -> AudioReceived:
-    """Receive one spoken answer as a file (multipart/form-data, field name "audio").
+    session_id: int,
+    audio: UploadFile,
+    db: DB,
+    user: CurrentUser,
+    interviewer: InterviewerDep,
+    storage: AudioStorageDep,
+    speech_to_text: SpeechToTextDep,
+) -> AnswerOut:
+    """A spoken answer as a file (multipart/form-data, field name "audio").
 
-    Week 3 Step 2: only checks and measures the upload. Steps 3-6 add ffmpeg, storage,
-    speech-to-text and the interviewer's spoken reply.
+    Decode -> transcribe -> store -> the same interviewer as typed answers. Step 6 adds the
+    interviewer's spoken reply.
     """
     session = _get_own_session(db, session_id, user)
     if session.status != "in_progress":
@@ -120,6 +139,19 @@ def upload_audio(
     if duration < MIN_AUDIO_SECONDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Recording is too short")
 
+    try:
+        transcript = speech_to_text.transcribe(wav)
+    except SpeechToTextError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Could not process the recording. Try again."
+        ) from None
+    if not transcript:
+        # Silence or noise: ask again without a turn, an LLM call, or using up the agent's
+        # short-answer retries. The candidate hasn't answered anything yet.
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "No speech detected. Please try again."
+        )
+
     # Saved after every check, so rejected uploads never take up storage. The WAV rather
     # than the original: bigger, but one format that every browser can play back.
     key = new_audio_key(session.id)
@@ -131,10 +163,5 @@ def upload_audio(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Could not save the recording. Try again."
         ) from None
 
-    return AudioReceived(
-        size_bytes=len(data),
-        content_type=content_type,
-        duration_seconds=round(duration, 2),
-        wav_bytes=len(wav),
-        audio_key=key,
-    )
+    # The same limit as typed answers: 10 MB of audio could transcribe to a very long text.
+    return _answer(db, session, transcript[:MAX_ANSWER_CHARS], interviewer, key)

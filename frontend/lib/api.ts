@@ -190,21 +190,13 @@ export const sendAnswer = (id: number, text: string) =>
     body: { text },
   });
 
-export type AudioReceived = {
-  size_bytes: number;
-  content_type: string;
-  duration_seconds: number; // measured by the server after decoding with ffmpeg
-  wav_bytes: number; // size after converting to 16 kHz mono WAV
-  audio_key: string; // where the WAV is stored
-};
-
-/** Week 3 Step 2: send a recording; the backend only confirms what it received for now. */
+/** A spoken answer: the server transcribes it and answers like sendAnswer. */
 export function uploadAudio(id: number, blob: Blob) {
   const form = new FormData();
   // "audio" must match the backend parameter name. The file name is only a label; the
   // format travels as the blob's type (e.g. "audio/webm;codecs=opus").
   form.append("audio", blob, "answer");
-  return apiFetch<AudioReceived>(`/sessions/${id}/audio`, {
+  return apiFetch<AnswerResult>(`/sessions/${id}/audio`, {
     method: "POST",
     body: form,
   });

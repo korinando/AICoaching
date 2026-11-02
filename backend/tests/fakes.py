@@ -34,6 +34,21 @@ class FakeAudioStorage:
         self.files[key] = (data, content_type)
 
 
+class FakeSpeechToText:
+    """SpeechToText for tests: returns a set text, records what it was given, or fails."""
+
+    def __init__(self, text: str = ANSWER) -> None:
+        self.text = text
+        self.error: Exception | None = None
+        self.calls: list[bytes] = []
+
+    def transcribe(self, wav: bytes) -> str:
+        self.calls.append(wav)
+        if self.error:
+            raise self.error
+        return self.text
+
+
 def decision(action: Action, text: str = "Scripted reply.") -> AgentDecision:
     """A scripted AgentDecision for FakeLLMClient."""
     return AgentDecision(action=action, reasoning="test", text=text)

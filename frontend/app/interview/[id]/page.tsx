@@ -44,7 +44,6 @@ function Interview() {
   const [pending, setPending] = useState<string | null>(null); // answer sent, reply not back yet
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [audioInfo, setAudioInfo] = useState<string | null>(null); // Step 2: what the server got
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Load the whole transcript from the server. This is what makes a page refresh safe:
@@ -91,20 +90,18 @@ function Interview() {
     }
   }
 
-  /** Step 2: upload the recording and show what the server received. From Step 5 the
-   * response will contain the transcribed answer and the reply, like sendAnswer. */
+  /** A spoken answer: the server transcribes it and answers like a typed one. */
   async function sendRecording(recording: Recording) {
     if (!session) return;
     setUploading(true);
     setError(null);
-    setAudioInfo(null);
     try {
-      const received = await uploadAudio(session.id, recording.blob);
-      setAudioInfo(
-        `Server received ${(received.size_bytes / 1024).toFixed(1)} KB (${received.content_type}), ` +
-          `decoded ${received.duration_seconds.toFixed(1)} s → ${(received.wav_bytes / 1024).toFixed(1)} KB WAV. ` +
-          `Saved as ${received.audio_key}. Turning speech into text comes in Step 5.`,
-      );
+      const result = await uploadAudio(session.id, recording.blob);
+      setSession({
+        ...session,
+        status: result.status,
+        turns: [...session.turns, ...result.turns],
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not send the recording");
     } finally {
@@ -168,9 +165,8 @@ function Interview() {
             disabled={pending !== null || uploading}
           />
           {uploading && (
-            <p className="text-sm text-zinc-500">Sending recording…</p>
+            <p className="text-sm text-zinc-500">Listening to your answer…</p>
           )}
-          {audioInfo && <p className="text-sm text-zinc-500">{audioInfo}</p>}
           <div className="flex gap-2">
             <textarea
               value={draft}
