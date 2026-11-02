@@ -80,10 +80,12 @@ class AnswerOut(BaseModel):
 
 
 class AudioReceived(BaseModel):
-    """Step 2 only: proof the recording arrived. Later steps answer with the new turns."""
+    """Steps 2-3: proof the recording arrived and was decoded. Step 5 answers with turns."""
 
     size_bytes: int
     content_type: str
+    duration_seconds: float  # measured by decoding the audio, not trusted from the browser
+    wav_bytes: int  # size after converting to 16 kHz mono WAV
 
 
 class UserOut(BaseModel):

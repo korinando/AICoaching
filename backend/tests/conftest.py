@@ -15,6 +15,7 @@ from app.core.db import get_db
 from app.core.security import create_token
 from app.main import app
 from app.models import Base, InterviewTemplate, User
+from tests.audio_samples import make_samples
 from tests.db_utils import scratch_database_url
 from tests.fakes import FakeLLMClient
 
@@ -63,6 +64,19 @@ def db(test_engine: Engine) -> Iterator[Session]:
     session.close()
     transaction.rollback()
     connection.close()
+
+
+@pytest.fixture(scope="session")
+def audio_samples(tmp_path_factory: pytest.TempPathFactory) -> dict[str, bytes]:
+    """Real audio files (webm, mp4, ogg, short_webm), generated once per test run.
+
+    Needs ffmpeg: without it the audio tests fail with a clear message instead of
+    silently skipping.
+    """
+    try:
+        return make_samples(tmp_path_factory.mktemp("audio"))
+    except RuntimeError as e:
+        pytest.fail(str(e))
 
 
 @pytest.fixture

@@ -102,7 +102,8 @@ function Interview() {
       const received = await uploadAudio(session.id, recording.blob);
       setAudioInfo(
         `Server received ${(received.size_bytes / 1024).toFixed(1)} KB (${received.content_type}), ` +
-          `${(recording.durationMs / 1000).toFixed(1)} s. Turning speech into text comes in Step 5.`,
+          `decoded ${received.duration_seconds.toFixed(1)} s → ${(received.wav_bytes / 1024).toFixed(1)} KB WAV. ` +
+          `Turning speech into text comes in Step 5.`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not send the recording");

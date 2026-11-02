@@ -12,12 +12,16 @@ from app.api.schemas import (
 )
 from app.models import InterviewSession, InterviewTemplate, User
 from app.services.interviews import InterviewClosedError, start_interview, submit_answer
+from app.speech.audio import AudioError, normalize_audio, wav_duration_seconds
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 # Opus (Chrome) is about 4 KB per second of speech, so 10 MB is many minutes of talking:
 # far more than any answer, but small enough that one request can't fill the server's memory.
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
+# The plan: reject recordings shorter than about 1 second. The frontend checks this too,
+# but the server can't trust the client, so it measures the decoded audio itself.
+MIN_AUDIO_SECONDS = 1.0
 
 
 def _get_own_session(db: DB, session_id: int, user: User) -> InterviewSession:
@@ -102,4 +106,20 @@ def upload_audio(session_id: int, audio: UploadFile, db: DB, user: CurrentUser) 
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The recording is empty")
 
-    return AudioReceived(size_bytes=len(data), content_type=content_type)
+    try:
+        wav = normalize_audio(data)
+    except AudioError:
+        # Claimed to be audio, but ffmpeg can't decode it: corrupt, or not audio at all.
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Could not read the recording as audio"
+        ) from None
+    duration = wav_duration_seconds(wav)
+    if duration < MIN_AUDIO_SECONDS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Recording is too short")
+
+    return AudioReceived(
+        size_bytes=len(data),
+        content_type=content_type,
+        duration_seconds=round(duration, 2),
+        wav_bytes=len(wav),
+    )
