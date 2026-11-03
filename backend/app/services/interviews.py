@@ -122,6 +122,15 @@ def start_interview(
     return session
 
 
+def abandon_interview(db: Session, session: InterviewSession) -> None:
+    """The user ended the interview early. Everything said so far stays saved."""
+    if session.status != "in_progress":
+        raise InterviewClosedError(f"Session {session.id} is {session.status}")
+    session.status = "abandoned"
+    session.ended_at = datetime.now(UTC)
+    db.commit()
+
+
 def submit_answer(
     db: Session,
     session: InterviewSession,

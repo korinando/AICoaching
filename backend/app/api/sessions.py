@@ -14,7 +14,6 @@ from app.api.deps import (
     TextToSpeechDep,
 )
 from app.api.schemas import (
-    MAX_ANSWER_CHARS,
     AnswerOut,
     AnswerRequest,
     FirstAudioReport,
@@ -30,19 +29,21 @@ from app.services.interviews import (
     start_interview,
     submit_answer,
 )
-from app.speech.audio import AudioError, normalize_audio, wav_duration_seconds
-from app.speech.storage import AudioStorage, StorageError, new_audio_key
-from app.speech.stt import SpeechToTextError
+from app.services.recordings import MAX_AUDIO_BYTES, RecordingError, process_recording
+from app.speech.storage import AudioStorage, StorageError
 from app.speech.tts import TextToSpeech
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
-# Opus (Chrome) is about 4 KB per second of speech, so 10 MB is many minutes of talking:
-# far more than any answer, but small enough that one request can't fill the server's memory.
-MAX_AUDIO_BYTES = 10 * 1024 * 1024
-# The plan: reject recordings shorter than about 1 second. The frontend checks this too,
-# but the server can't trust the client, so it measures the decoded audio itself.
-MIN_AUDIO_SECONDS = 1.0
+RECORDING_ERROR_STATUS = {
+    "too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+    "empty": status.HTTP_400_BAD_REQUEST,
+    "unreadable": status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    "too_short": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "no_speech": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # 503: the request was fine, a service behind the API is down. Trying again may work.
+    "unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+}
 
 
 def _get_own_session(db: DB, session_id: int, user: User) -> InterviewSession:
@@ -198,48 +199,18 @@ def upload_audio(
     # Read at most one byte more than allowed: enough to know it's too big, without
     # loading a huge upload into memory.
     data = audio.file.read(MAX_AUDIO_BYTES + 1)
-    if len(data) > MAX_AUDIO_BYTES:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Recording is too long")
-    if not data:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The recording is empty")
-
     try:
-        wav = normalize_audio(data)
-    except AudioError:
-        # Claimed to be audio, but ffmpeg can't decode it: corrupt, or not audio at all.
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Could not read the recording as audio"
-        ) from None
-    duration = wav_duration_seconds(wav)
-    if duration < MIN_AUDIO_SECONDS:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Recording is too short")
-
-    stt_started = time.perf_counter()
-    try:
-        transcript = speech_to_text.transcribe(wav)
-    except SpeechToTextError:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, "Could not process the recording. Try again."
-        ) from None
-    stt_ms = elapsed_ms(stt_started)
-    if not transcript:
-        # Silence or noise: ask again without a turn, an LLM call, or using up the agent's
-        # short-answer retries. The candidate hasn't answered anything yet.
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "No speech detected. Please try again."
-        )
-
-    # Saved after every check, so rejected uploads never take up storage. The WAV rather
-    # than the original: bigger, but one format that every browser can play back.
-    key = new_audio_key(session.id)
-    try:
-        storage.save(key, wav, "audio/wav")
-    except StorageError:
-        # 503: the request was fine, a service behind the API is down. Trying again may work.
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, "Could not save the recording. Try again."
-        ) from None
-
-    # The same limit as typed answers: 10 MB of audio could transcribe to a very long text.
-    text = transcript[:MAX_ANSWER_CHARS]
-    return _answer(db, session, text, interviewer, tts, storage, started, key, stt_ms)
+        recording = process_recording(data, session.id, speech_to_text, storage)
+    except RecordingError as e:
+        raise HTTPException(RECORDING_ERROR_STATUS[e.reason], e.message) from None
+    return _answer(
+        db,
+        session,
+        recording.text,
+        interviewer,
+        tts,
+        storage,
+        started,
+        recording.audio_key,
+        recording.stt_ms,
+    )

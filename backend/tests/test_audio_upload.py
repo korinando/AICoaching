@@ -7,12 +7,12 @@ import pytest
 from sqlalchemy import select
 
 from app.agent.interviewer import REPEAT_TEXT
-from app.api import sessions as sessions_api
 from app.api.deps import get_speech_to_text
 from app.api.schemas import MAX_ANSWER_CHARS
 from app.core.security import create_token
 from app.main import app
 from app.models import InterviewSession, Turn, User
+from app.services import recordings
 from app.speech.storage import StorageError
 from app.speech.stt import SpeechToTextError
 from tests.fakes import ANSWER, FakeSpeechToText, decision
@@ -222,7 +222,7 @@ def test_empty_recording_is_400(client, auth_headers, session_id):
 
 def test_too_big_is_413(client, auth_headers, session_id, monkeypatch):
     # A small limit for the test, instead of sending 10 MB. Checked before decoding.
-    monkeypatch.setattr(sessions_api, "MAX_AUDIO_BYTES", 1000)
+    monkeypatch.setattr(recordings, "MAX_AUDIO_BYTES", 1000)
 
     response = upload(client, session_id, auth_headers, b"\x00" * 1001)
 

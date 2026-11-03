@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, health, sessions, templates
+from app.api import auth, health, sessions, templates, ws
 from app.core.config import get_settings
 
 
@@ -35,3 +35,4 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(sessions.router)
+app.include_router(ws.router)
