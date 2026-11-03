@@ -8,6 +8,7 @@ def test_all_templates_load():
     templates = load_templates()
     assert "junior_backend" in templates
     assert "junior_frontend" in templates
+    assert "junior_ai_engineer" in templates
     for template in templates.values():
         assert len(template.topics) >= 1
 

@@ -9,8 +9,14 @@ from faster_whisper import WhisperModel
 # ("post grass Q L"). Words from the interview topics, not a sentence to transcribe.
 VOCABULARY_HINT = (
     "REST API, HTTP, GET, POST, JSON, SQL, NoSQL, PostgreSQL, database index, Git, git fetch, "
-    "git merge, git rebase, debugging, HTML, CSS, JavaScript, React, idempotent."
+    "git merge, git rebase, debugging, HTML, CSS, JavaScript, React, idempotent, "
+    "machine learning, overfitting, LLM, prompt, RAG, embeddings, vector database, tokens."
 )
+# Limits the cost when Whisper gets stuck repeating a word on unclear audio. By default it
+# fills the model's 448 tokens (prompt included) and retries 5 times. Real answers stayed
+# under 60 tokens per segment, and most segments never retry, so their text doesn't change.
+RETRY_TEMPERATURES = [0.0, 1.0]  # 1.0: the most random attempt, the one least likely to loop
+MAX_TOKENS_PER_SEGMENT = 160
 
 
 class SpeechToTextError(Exception):
@@ -41,6 +47,8 @@ class WhisperSpeechToText:
                 io.BytesIO(wav),
                 language="en",  # don't let an accent make it guess another language
                 initial_prompt=VOCABULARY_HINT,
+                temperature=RETRY_TEMPERATURES,
+                max_new_tokens=MAX_TOKENS_PER_SEGMENT,
                 # Voice activity detection: drop the silence first. On pure silence, Whisper
                 # tends to invent text; with this it returns nothing.
                 vad_filter=True,

@@ -12,5 +12,12 @@
         "interview_type": "technical",
         "topics": ["HTML/CSS","JavaScript","React","Browser debugging", "Teamwork"],
         "max_main_questions": 5
-      }
+      },
+  "junior_ai_engineer": {
+    "role": "Junior AI Engineer",
+    "level": "junior",
+    "interview_type": "technical",
+    "topics": ["Machine learning basics", "LLMs and prompting", "RAG and embeddings", "Evaluating AI systems", "Teamwork"],
+    "max_main_questions": 5
+  }
 }
