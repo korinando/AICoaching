@@ -15,6 +15,7 @@ import {
   type AnswerResult,
   ApiError,
   getSession,
+  reportFirstAudio,
   sendAnswer,
   type Session,
   type Turn,
@@ -76,14 +77,27 @@ function Interview() {
   }, [session?.turns.length, pending]);
 
   /** Add the new turns to the chat and speak the interviewer's reply. */
-  function showResult(current: Session, result: AnswerResult) {
+  async function showResult(
+    current: Session,
+    result: AnswerResult,
+    endOfSpeech?: number,
+  ) {
     setSession({
       ...current,
       status: result.status,
       turns: [...current.turns, ...result.turns],
     });
     const reply = result.turns.at(-1);
-    if (reply?.has_audio) void play(current.id, reply.turn_index);
+    if (!reply?.has_audio) return;
+    const started = await play(current.id, reply.turn_index);
+    // Only for spoken answers, and only if the sound really started. A lost measurement
+    // doesn't matter to the user, so a failed report is ignored.
+    if (started && endOfSpeech !== undefined) {
+      const firstAudioMs = performance.now() - endOfSpeech;
+      reportFirstAudio(current.id, reply.turn_index, firstAudioMs).catch(
+        () => {},
+      );
+    }
   }
 
   async function send() {
@@ -94,7 +108,7 @@ function Interview() {
     setError(null);
     try {
       // The server returns the answer as saved plus the reply.
-      showResult(session, await sendAnswer(session.id, text));
+      void showResult(session, await sendAnswer(session.id, text));
     } catch (e) {
       setDraft(text); // give the text back so nothing typed is lost
       setError(e instanceof Error ? e.message : "Could not send the answer");
@@ -111,7 +125,8 @@ function Interview() {
     setUploading(true);
     setError(null);
     try {
-      showResult(session, await uploadAudio(session.id, recording.blob));
+      const result = await uploadAudio(session.id, recording.blob);
+      void showResult(session, result, recording.stoppedAt);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not send the recording");
     } finally {

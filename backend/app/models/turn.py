@@ -33,7 +33,12 @@ class Turn(Base):
     stt_ms: Mapped[int | None]
     llm_ms: Mapped[int | None]
     tts_ms: Mapped[int | None]
+    # Latency of one reply, all on the interviewer's turn (Week 3 Step 7). Whisper, the
+    # interviewer, Piper, then the whole server side from receiving the upload to audio ready.
     total_latency_ms: Mapped[int | None]
+    # Measured by the browser: end of my speech -> the reply starts playing. Also counts the
+    # upload, the audio download and the browser, which the server can't see.
+    first_audio_ms: Mapped[int | None]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     session: Mapped["InterviewSession"] = relationship(back_populates="turns")

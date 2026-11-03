@@ -21,18 +21,21 @@ export function useTurnAudio() {
   }, []);
 
   const play = useCallback(
-    async (sessionId: number, turnIndex: number) => {
+    /** Resolves true if the sound really started. */
+    async (sessionId: number, turnIndex: number): Promise<boolean> => {
       stop();
       const request = requestRef.current;
       try {
         const blob = await getTurnAudio(sessionId, turnIndex);
         // Something newer happened while downloading (e.g. the user started talking).
-        if (request !== requestRef.current) return;
+        if (request !== requestRef.current) return false;
         urlRef.current = URL.createObjectURL(blob);
         audioRef.current = new Audio(urlRef.current);
-        await audioRef.current.play();
+        await audioRef.current.play(); // resolves when the sound has really started
+        return true;
       } catch {
         // No sound this time; the text is on screen and the 🔊 button can try again.
+        return false;
       }
     },
     [stop],

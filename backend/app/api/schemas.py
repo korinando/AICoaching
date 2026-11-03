@@ -62,6 +62,12 @@ class TurnOut(BaseModel):
     has_audio: bool  # True: GET /sessions/{id}/turns/{turn_index}/audio plays it
 
 
+class FirstAudioReport(BaseModel):
+    """The browser's measurement. le: a broken client can't store a nonsense number."""
+
+    first_audio_ms: int = Field(ge=0, le=600_000)
+
+
 class SessionOut(BaseModel):
     """A session with its full transcript: what the chat page shows after a refresh."""
 

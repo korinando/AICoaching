@@ -6,6 +6,7 @@ is kept in memory between requests, so a server restart loses nothing.
 """
 
 import logging
+import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
@@ -18,6 +19,12 @@ from app.speech.storage import AudioStorage, StorageError, new_audio_key
 from app.speech.tts import TextToSpeech, TextToSpeechError
 
 logger = logging.getLogger(__name__)
+
+
+def elapsed_ms(started: float) -> int:
+    """Milliseconds since started = time.perf_counter(), a clock made for measuring durations
+    (unlike the wall clock, it can't jump when the system time changes)."""
+    return round((time.perf_counter() - started) * 1000)
 
 
 class InterviewClosedError(Exception):
@@ -86,12 +93,16 @@ def speak_turns(
         if turn.speaker != "interviewer":
             continue
         try:
+            started = time.perf_counter()
+            wav = tts.synthesize(turn.text)
+            tts_ms = elapsed_ms(started)
             key = new_audio_key(session.id)
-            storage.save(key, tts.synthesize(turn.text), "audio/wav")
+            storage.save(key, wav, "audio/wav")
         except (TextToSpeechError, StorageError) as e:
             logger.warning("Session %s turn %s has no audio: %s", session.id, turn.turn_index, e)
         else:
             turn.audio_url = key
+            turn.tts_ms = tts_ms
     db.commit()
 
 
@@ -100,9 +111,12 @@ def start_interview(
 ) -> InterviewSession:
     """Create a session and ask the opening question."""
     state = state_from_template(template)
+    started = time.perf_counter()
     interviewer.start(state)
+    llm_ms = elapsed_ms(started)
     session = InterviewSession(user=user, template=template, agent_state={})
     _save(session, state, first_new=0)
+    session.turns[-1].llm_ms = llm_ms
     db.add(session)
     db.commit()
     return session
@@ -114,19 +128,26 @@ def submit_answer(
     answer: str,
     interviewer: Interviewer,
     audio_key: str | None = None,
+    stt_ms: int | None = None,
 ) -> str:
     """Handle one candidate answer and return the interviewer's reply.
 
-    audio_key: where the recording is stored, for a spoken answer; None for a typed one.
+    audio_key and stt_ms: where the recording is stored and how long Whisper took, for a
+    spoken answer; None for a typed one.
     """
     if session.status != "in_progress":
         raise InterviewClosedError(f"Session {session.id} is {session.status}")
     state = load_state(session)
     first_new = len(state.history)
+    started = time.perf_counter()
     reply = interviewer.handle_answer(state, answer)
+    llm_ms = elapsed_ms(started)  # includes any retry; about 0 if a rule answered without the LLM
     # handle_answer adds 2 messages (answer + reply); saving from first_new catches both.
     # If two requests for one session race, both get the same turn_index and the unique
     # constraint (session_id, turn_index) from Step 3 rejects the second commit.
     _save(session, state, first_new, audio_key)
+    reply_turn = session.turns[-1]
+    reply_turn.stt_ms = stt_ms
+    reply_turn.llm_ms = llm_ms
     db.commit()
     return reply

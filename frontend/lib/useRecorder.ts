@@ -1,9 +1,18 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-export type Recording = { blob: Blob; mimeType: string; durationMs: number };
+export type Recording = {
+  blob: Blob;
+  mimeType: string;
+  durationMs: number;
+  stoppedAt: number; // performance.now() at release: the end of speech, for latency
+};
 
-const PREFERRED_TYPES = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"];
+const PREFERRED_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+];
 
 export function useRecorder() {
   const [isRecording, setIsRecording] = useState(false);
@@ -34,11 +43,15 @@ export function useRecorder() {
 
     if (!streamRef.current) {
       try {
-        streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
       } catch (e) {
         const name = e instanceof DOMException ? e.name : "";
         if (name === "NotAllowedError") {
-          setError("Microphone blocked. Click the 🔒 icon in the address bar and allow the microphone.");
+          setError(
+            "Microphone blocked. Click the 🔒 icon in the address bar and allow the microphone.",
+          );
         } else if (name === "NotFoundError") {
           setError("No microphone found. Plug one in and try again.");
         } else {
@@ -52,9 +65,14 @@ export function useRecorder() {
     // Released while the permission popup was open? Then don't start recording.
     if (!holdingRef.current) return;
 
-    const mimeType = PREFERRED_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
+    const mimeType = PREFERRED_TYPES.find((type) =>
+      MediaRecorder.isTypeSupported(type),
+    );
 
-    const recorder = new MediaRecorder(streamRef.current, mimeType ? { mimeType } : undefined);
+    const recorder = new MediaRecorder(
+      streamRef.current,
+      mimeType ? { mimeType } : undefined,
+    );
     chunksRef.current = []; // forget the previous recording
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -66,6 +84,7 @@ export function useRecorder() {
   }
 
   function stop(): Promise<Recording | null> {
+    const stoppedAt = performance.now(); // read now: finishing the recording takes a moment
     holdingRef.current = false; // tells a start() still waiting for permission: don't record
     const recorder = recorderRef.current;
     if (!recorder || recorder.state !== "recording") {
@@ -75,7 +94,12 @@ export function useRecorder() {
     return new Promise((resolve) => {
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
-        resolve({ blob, mimeType: recorder.mimeType, durationMs: Date.now() - startedAtRef.current });
+        resolve({
+          blob,
+          mimeType: recorder.mimeType,
+          durationMs: Date.now() - startedAtRef.current,
+          stoppedAt,
+        });
       };
       recorder.stop();
       setIsRecording(false);

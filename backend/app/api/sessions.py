@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +17,7 @@ from app.api.schemas import (
     MAX_ANSWER_CHARS,
     AnswerOut,
     AnswerRequest,
+    FirstAudioReport,
     SessionCreate,
     SessionOut,
     TurnOut,
@@ -22,6 +25,7 @@ from app.api.schemas import (
 from app.models import InterviewSession, InterviewTemplate, Turn, User
 from app.services.interviews import (
     InterviewClosedError,
+    elapsed_ms,
     speak_turns,
     start_interview,
     submit_answer,
@@ -91,8 +95,9 @@ def answer(
 
     Temporary: Week 4 replaces this with a WebSocket for voice streaming.
     """
+    started = time.perf_counter()
     session = _get_own_session(db, session_id, user)
-    return _answer(db, session, body.text, interviewer, tts, storage)
+    return _answer(db, session, body.text, interviewer, tts, storage, started)
 
 
 def _answer(
@@ -102,12 +107,14 @@ def _answer(
     interviewer: Interviewer,
     tts: TextToSpeech,
     storage: AudioStorage,
+    started: float,
     audio_key: str | None = None,
+    stt_ms: int | None = None,
 ) -> AnswerOut:
     """Typed and spoken answers both end here: run the agent, save, speak, return new turns."""
     before = len(session.turns)
     try:
-        submit_answer(db, session, text, interviewer, audio_key)
+        submit_answer(db, session, text, interviewer, audio_key, stt_ms)
     except InterviewClosedError:
         # 409 Conflict: the request is valid, but the session's state doesn't allow it.
         raise HTTPException(status.HTTP_409_CONFLICT, "Interview already finished") from None
@@ -122,6 +129,8 @@ def _answer(
     new_turns = session.turns[before:]
     # After the commit above: the answer is safe even if speaking the reply goes wrong.
     speak_turns(db, session, new_turns, tts, storage)
+    new_turns[-1].total_latency_ms = elapsed_ms(started)
+    db.commit()
     return AnswerOut(status=session.status, turns=[TurnOut.model_validate(t) for t in new_turns])
 
 
@@ -145,6 +154,21 @@ def get_turn_audio(
         ) from None
 
 
+@router.post("/{session_id}/turns/{turn_index}/first-audio", status_code=status.HTTP_204_NO_CONTENT)
+def report_first_audio(
+    session_id: int, turn_index: int, body: FirstAudioReport, db: DB, user: CurrentUser
+) -> None:
+    """The browser reports: end of my speech -> this reply started playing."""
+    session = _get_own_session(db, session_id, user)
+    turn = db.scalar(
+        select(Turn).where(Turn.session_id == session.id, Turn.turn_index == turn_index)
+    )
+    if turn is None or turn.speaker != "interviewer":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such reply")
+    turn.first_audio_ms = body.first_audio_ms
+    db.commit()
+
+
 @router.post("/{session_id}/audio")
 def upload_audio(
     session_id: int,
@@ -160,6 +184,7 @@ def upload_audio(
 
     Decode -> transcribe -> store -> the same interviewer as typed answers -> spoken reply.
     """
+    started = time.perf_counter()  # the upload has already arrived; the browser measures that
     session = _get_own_session(db, session_id, user)
     if session.status != "in_progress":
         raise HTTPException(status.HTTP_409_CONFLICT, "Interview already finished")
@@ -189,12 +214,14 @@ def upload_audio(
     if duration < MIN_AUDIO_SECONDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Recording is too short")
 
+    stt_started = time.perf_counter()
     try:
         transcript = speech_to_text.transcribe(wav)
     except SpeechToTextError:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Could not process the recording. Try again."
         ) from None
+    stt_ms = elapsed_ms(stt_started)
     if not transcript:
         # Silence or noise: ask again without a turn, an LLM call, or using up the agent's
         # short-answer retries. The candidate hasn't answered anything yet.
@@ -214,4 +241,5 @@ def upload_audio(
         ) from None
 
     # The same limit as typed answers: 10 MB of audio could transcribe to a very long text.
-    return _answer(db, session, transcript[:MAX_ANSWER_CHARS], interviewer, tts, storage, key)
+    text = transcript[:MAX_ANSWER_CHARS]
+    return _answer(db, session, text, interviewer, tts, storage, started, key, stt_ms)

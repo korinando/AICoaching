@@ -117,7 +117,12 @@ async function refreshTokens(): Promise<boolean> {
 
 async function apiFetch<T>(
   path: string,
-  options: { method?: string; body?: unknown; blob?: boolean } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    blob?: boolean; // the response is a file
+    empty?: boolean; // the response has no body (204)
+  } = {},
 ): Promise<T> {
   // A file upload (FormData) is sent as it is, WITHOUT a Content-Type header: the browser then
   // writes "multipart/form-data; boundary=..." itself, and the boundary (the marker between
@@ -147,6 +152,7 @@ async function apiFetch<T>(
     if (await refreshing) response = await send();
   }
   if (!response.ok) throw await errorFrom(response);
+  if (options.empty) return undefined as T;
   return (options.blob ? response.blob() : response.json()) as Promise<T>;
 }
 
@@ -196,6 +202,18 @@ export const sendAnswer = (id: number, text: string) =>
 export const getTurnAudio = (sessionId: number, turnIndex: number) =>
   apiFetch<Blob>(`/sessions/${sessionId}/turns/${turnIndex}/audio`, {
     blob: true,
+  });
+
+/** Latency measured here in the browser: end of speech -> the reply started playing. */
+export const reportFirstAudio = (
+  sessionId: number,
+  turnIndex: number,
+  firstAudioMs: number,
+) =>
+  apiFetch<void>(`/sessions/${sessionId}/turns/${turnIndex}/first-audio`, {
+    method: "POST",
+    body: { first_audio_ms: Math.round(firstAudioMs) },
+    empty: true,
   });
 
 /** A spoken answer: the server transcribes it and answers like sendAnswer. */
