@@ -2,8 +2,10 @@
 
 Run from backend/:
     uv run python -m scripts.latency_report
+    uv run python -m scripts.latency_report --session 9     # one clean run
 """
 
+import argparse
 import math
 import statistics
 
@@ -41,9 +43,16 @@ def summary_line(name: str, values: list[int]) -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Latency of spoken replies.")
+    parser.add_argument("--session", type=int, nargs="+", help="only these sessions (default: all)")
+    args = parser.parse_args()
+
+    # stt_ms is only set on replies to a spoken answer.
+    query = select(Turn).where(Turn.stt_ms.is_not(None))
+    if args.session:
+        query = query.where(Turn.session_id.in_(args.session))
     with Session(get_engine()) as db:
-        # stt_ms is only set on replies to a spoken answer.
-        turns = db.scalars(select(Turn).where(Turn.stt_ms.is_not(None))).all()
+        turns = db.scalars(query).all()
     spoken = [t for t in turns if t.text not in RULE_REPLIES]
     print(f"{len(turns)} spoken answers, {len(turns) - len(spoken)} answered by a rule (not shown)")
     for name, column in STAGES:
