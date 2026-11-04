@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Iterator
-from typing import Any, Protocol
+from typing import Any, Protocol, get_args
 
 from google import genai
 from google.genai import types
