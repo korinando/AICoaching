@@ -12,18 +12,18 @@ import {
 
 import { TalkButton } from "@/components/TalkButton";
 import {
-  type AnswerResult,
   ApiError,
   getSession,
   reportFirstAudio,
-  sendAnswer,
   type Session,
   type Turn,
-  uploadAudio,
 } from "@/lib/api";
+import { useAudioQueue } from "@/lib/useAudioQueue";
+import { useInterviewSocket } from "@/lib/useInterviewSocket";
 import type { Recording } from "@/lib/useRecorder";
 import { useRequireLogin } from "@/lib/useRequireLogin";
 import { useTurnAudio } from "@/lib/useTurnAudio";
+import type { ServerMessage } from "@/lib/wsMessages";
 
 /** The [id] in the URL is only known when someone opens the page, not at build time.
  * next.config has cacheComponents on, so Next.js prerenders pages during the build; reading
@@ -44,11 +44,30 @@ function Interview() {
 
   const [session, setSession] = useState<Session | null>(null);
   const [draft, setDraft] = useState("");
-  const [pending, setPending] = useState<string | null>(null); // answer sent, reply not back yet
+  // One answer and reply on their way, only for showing. session.turns stays what the server saved.
+  const [pending, setPending] = useState<string | null>(null); // the answer, typed or transcribed
+  const [reply, setReply] = useState(""); // the sentences that have arrived so far
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState(false); // recording sent, no transcript yet
   const bottomRef = useRef<HTMLDivElement>(null);
+  const typedRef = useRef<string | null>(null); // to give it back if the server refuses it
+  const endOfSpeechRef = useRef<number | null>(null); // only set for a spoken answer
+  const firstAudioRef = useRef<Promise<number | null> | null>(null);
   const { play, stop } = useTurnAudio();
+  const queue = useAudioQueue();
+
+  const busy = pending !== null || uploading;
+  const { send: sendToSocket } = useInterviewSocket(
+    sessionId,
+    session?.status === "in_progress",
+    {
+      onMessage: handleMessage,
+      onLost: () => {
+        setError("Connection lost. Refresh the page to continue.");
+        void finishTurn();
+      },
+    },
+  );
 
   // Load the whole transcript from the server. This is what makes a page refresh safe:
   // nothing lives only in the browser.
@@ -74,64 +93,98 @@ function Interview() {
   // Keep the newest message in view.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.turns.length, pending]);
+  }, [session?.turns.length, pending, reply]);
 
-  /** Add the new turns to the chat and speak the interviewer's reply. */
-  async function showResult(
-    current: Session,
-    result: AnswerResult,
-    endOfSpeech?: number,
-  ) {
-    setSession({
-      ...current,
-      status: result.status,
-      turns: [...current.turns, ...result.turns],
-    });
-    const reply = result.turns.at(-1);
-    if (!reply?.has_audio) return;
-    const started = await play(current.id, reply.turn_index);
-    // Only for spoken answers, and only if the sound really started. A lost measurement
-    // doesn't matter to the user, so a failed report is ignored.
-    if (started && endOfSpeech !== undefined) {
-      const firstAudioMs = performance.now() - endOfSpeech;
-      reportFirstAudio(current.id, reply.turn_index, firstAudioMs).catch(
-        () => {},
-      );
+  function handleMessage(message: ServerMessage) {
+    switch (message.type) {
+      case "transcript":
+        typedRef.current = null;
+        setUploading(false);
+        setPending(message.text);
+        break;
+      case "interviewer_text":
+        setReply((current) =>
+          current ? `${current} ${message.text}` : message.text,
+        );
+        break;
+      case "audio_chunk": {
+        const scheduled = queue.enqueue(message.audio_base64);
+        const endOfSpeech = endOfSpeechRef.current;
+        if (endOfSpeech !== null && firstAudioRef.current === null) {
+          firstAudioRef.current = scheduled.then((started) =>
+            started ? performance.now() - endOfSpeech : null,
+          );
+        }
+        break;
+      }
+      case "turn_complete":
+        // Reported now and not at the first sound: the first sound can come before the server
+        // has saved the turn. A lost measurement doesn't matter to the user, so it's ignored.
+        void firstAudioRef.current?.then((ms) => {
+          if (ms !== null) {
+            reportFirstAudio(sessionId, message.turn_index, ms).catch(() => {});
+          }
+        });
+        void finishTurn();
+        break;
+      case "session_ended":
+        setSession((s) => s && { ...s, status: message.status });
+        break;
+      case "error":
+        setError(message.message);
+        void finishTurn();
+        break;
     }
   }
 
-  async function send() {
+  /** The reply is finished or failed: show what the server really saved. */
+  async function finishTurn() {
+    // Still set only if the server never accepted it. Nothing typed is lost.
+    if (typedRef.current !== null) setDraft(typedRef.current);
+    typedRef.current = null;
+    endOfSpeechRef.current = null;
+    firstAudioRef.current = null;
+    try {
+      setSession(await getSession(sessionId));
+    } catch {
+      // Keep a message that's already there: it says what really went wrong.
+      setError((current) => current ?? "Could not reload the interview.");
+    }
+    setPending(null);
+    setReply("");
+    setUploading(false);
+  }
+
+  /** Stop any sound that is still playing. */
+  function prepareToAnswer() {
+    stop();
+    queue.stop();
+  }
+
+  function send() {
     const text = draft;
-    if (!session || pending !== null) return;
+    if (!session || busy) return;
+    prepareToAnswer();
+    setError(null);
+    if (!sendToSocket({ type: "text_answer", text })) {
+      setError("Not connected. Refresh the page to continue.");
+      return;
+    }
+    typedRef.current = text;
     setPending(text);
     setDraft("");
-    setError(null);
-    try {
-      // The server returns the answer as saved plus the reply.
-      void showResult(session, await sendAnswer(session.id, text));
-    } catch (e) {
-      setDraft(text); // give the text back so nothing typed is lost
-      setError(e instanceof Error ? e.message : "Could not send the answer");
-      if (e instanceof ApiError && e.status === 409)
-        setSession(await getSession(session.id));
-    } finally {
-      setPending(null);
-    }
   }
 
   /** A spoken answer: the server transcribes it and answers like a typed one. */
-  async function sendRecording(recording: Recording) {
+  function sendRecording(recording: Recording) {
     if (!session) return;
-    setUploading(true);
     setError(null);
-    try {
-      const result = await uploadAudio(session.id, recording.blob);
-      void showResult(session, result, recording.stoppedAt);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not send the recording");
-    } finally {
-      setUploading(false);
+    if (!sendToSocket(recording.blob)) {
+      setError("Not connected. Refresh the page to continue.");
+      return;
     }
+    endOfSpeechRef.current = recording.stoppedAt;
+    setUploading(true);
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -168,7 +221,10 @@ function Interview() {
             turn={turn}
             onPlay={
               turn.has_audio
-                ? () => void play(session.id, turn.turn_index)
+                ? () => {
+                    queue.stop();
+                    void play(session.id, turn.turn_index);
+                  }
                 : undefined
             }
           />
@@ -176,7 +232,13 @@ function Interview() {
         {pending !== null && (
           <>
             <Bubble turn={{ speaker: "candidate", text: pending }} faded />
-            <li className="text-sm text-zinc-500">Interviewer is thinking…</li>
+            {reply ? (
+              <Bubble turn={{ speaker: "interviewer", text: reply }} />
+            ) : (
+              <li className="text-sm text-zinc-500">
+                Interviewer is thinking…
+              </li>
+            )}
           </>
         )}
       </ol>
@@ -195,8 +257,8 @@ function Interview() {
         <div className="sticky bottom-0 mt-4 space-y-2 bg-background py-2">
           <TalkButton
             onRecorded={sendRecording}
-            onPress={stop} // don't record the interviewer's voice through the speakers
-            disabled={pending !== null || uploading}
+            onPress={prepareToAnswer} // don't record the interviewer's voice through the speakers
+            disabled={busy}
           />
           {uploading && (
             <p className="text-sm text-zinc-500">Listening to your answer…</p>
@@ -206,7 +268,7 @@ function Interview() {
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onKeyDown}
-              disabled={pending !== null}
+              disabled={busy}
               maxLength={4000}
               rows={3}
               placeholder="Type your answer… (Enter to send, Shift+Enter for a new line)"
@@ -214,7 +276,7 @@ function Interview() {
             />
             <button
               onClick={send}
-              disabled={pending !== null}
+              disabled={busy}
               className="self-end rounded-md bg-zinc-900 px-4 py-2 font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
             >
               Send

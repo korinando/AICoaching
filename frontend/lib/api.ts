@@ -68,6 +68,8 @@ export function isLoggedIn(): boolean {
   return localStorage.getItem(REFRESH_KEY) !== null;
 }
 
+export const accessToken = () => localStorage.getItem(ACCESS_KEY);
+
 // ---- Errors --------------------------------------------------------------------------------
 
 export class ApiError extends Error {
