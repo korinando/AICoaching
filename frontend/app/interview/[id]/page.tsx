@@ -49,24 +49,20 @@ function Interview() {
   const [reply, setReply] = useState(""); // the sentences that have arrived so far
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false); // recording sent, no transcript yet
+  const [finishing, setFinishing] = useState(false); // came back to an answer still being worked on
   const bottomRef = useRef<HTMLDivElement>(null);
   const typedRef = useRef<string | null>(null); // to give it back if the server refuses it
+  const givenBackRef = useRef<string | null>(null); // given back when the connection dropped
   const endOfSpeechRef = useRef<number | null>(null); // only set for a spoken answer
   const firstAudioRef = useRef<Promise<number | null> | null>(null);
   const { play, stop } = useTurnAudio();
   const queue = useAudioQueue();
 
-  const busy = pending !== null || uploading;
-  const { send: sendToSocket } = useInterviewSocket(
+  const busy = pending !== null || uploading || finishing;
+  const { send: sendToSocket, lost } = useInterviewSocket(
     sessionId,
     session?.status === "in_progress",
-    {
-      onMessage: handleMessage,
-      onLost: () => {
-        setError("Connection lost. Refresh the page to continue.");
-        void finishTurn();
-      },
-    },
+    { onMessage: handleMessage, onLost: handleLost, beforeReconnect },
   );
 
   // Load the whole transcript from the server. This is what makes a page refresh safe:
@@ -130,29 +126,64 @@ function Interview() {
       case "session_ended":
         setSession((s) => s && { ...s, status: message.status });
         break;
+      case "answer_in_progress":
+        // The server did get it, so the copy in the box must not be sent a second time.
+        forgetGivenBack();
+        setError(null);
+        setFinishing(true);
+        break;
       case "error":
         setError(message.message);
+        queue.stop(); // the reply's text is about to go too, so don't keep speaking it
         void finishTurn();
         break;
     }
   }
 
+  function forgetGivenBack() {
+    const text = givenBackRef.current;
+    givenBackRef.current = null;
+    setDraft((current) => (current === text ? "" : current));
+  }
+
+  function handleLost() {
+    if (typedRef.current !== null) givenBackRef.current = typedRef.current;
+    // A recording can't be given back. If it did arrive, answer_in_progress clears this.
+    if (uploading)
+      setError("If your answer doesn't appear, please say it again.");
+    clearTurn(); // no reload yet: the server may be away, and beforeReconnect loads it anyway
+  }
+
+  /** The answer may have been saved while the connection was down: don't offer to send it again. */
+  async function beforeReconnect() {
+    const loaded = await getSession(sessionId);
+    setSession(loaded);
+    const lastAnswer = loaded.turns.findLast((t) => t.speaker === "candidate");
+    if (lastAnswer?.text === givenBackRef.current) forgetGivenBack();
+  }
+
   /** The reply is finished or failed: show what the server really saved. */
   async function finishTurn() {
-    // Still set only if the server never accepted it. Nothing typed is lost.
-    if (typedRef.current !== null) setDraft(typedRef.current);
-    typedRef.current = null;
-    endOfSpeechRef.current = null;
-    firstAudioRef.current = null;
     try {
       setSession(await getSession(sessionId));
     } catch {
       // Keep a message that's already there: it says what really went wrong.
       setError((current) => current ?? "Could not reload the interview.");
     }
+    clearTurn();
+  }
+
+  /** Nothing is on its way any more. */
+  function clearTurn() {
+    // Still set only if the server never accepted it. Nothing typed is lost.
+    if (typedRef.current !== null) setDraft(typedRef.current);
+    typedRef.current = null;
+    endOfSpeechRef.current = null;
+    firstAudioRef.current = null;
     setPending(null);
     setReply("");
     setUploading(false);
+    setFinishing(false);
   }
 
   /** Stop any sound that is still playing. */
@@ -167,9 +198,10 @@ function Interview() {
     prepareToAnswer();
     setError(null);
     if (!sendToSocket({ type: "text_answer", text })) {
-      setError("Not connected. Refresh the page to continue.");
+      setError("Not connected yet. Please try again in a moment.");
       return;
     }
+    givenBackRef.current = null;
     typedRef.current = text;
     setPending(text);
     setDraft("");
@@ -180,7 +212,9 @@ function Interview() {
     if (!session) return;
     setError(null);
     if (!sendToSocket(recording.blob)) {
-      setError("Not connected. Refresh the page to continue.");
+      setError(
+        "Not connected, so that wasn't sent. Please say it again in a moment.",
+      );
       return;
     }
     endOfSpeechRef.current = recording.stoppedAt;
@@ -244,6 +278,16 @@ function Interview() {
       </ol>
       <div ref={bottomRef} />
 
+      {finishing && (
+        <p className="mt-2 text-sm text-zinc-500">
+          Finishing your last answer…
+        </p>
+      )}
+      {lost && !finished && (
+        <p className="mt-2 text-sm text-amber-600">
+          Connection lost. Reconnecting…
+        </p>
+      )}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
       {finished ? (
@@ -258,7 +302,7 @@ function Interview() {
           <TalkButton
             onRecorded={sendRecording}
             onPress={prepareToAnswer} // don't record the interviewer's voice through the speakers
-            disabled={busy}
+            disabled={busy || lost}
           />
           {uploading && (
             <p className="text-sm text-zinc-500">Listening to your answer…</p>
@@ -276,7 +320,7 @@ function Interview() {
             />
             <button
               onClick={send}
-              disabled={busy}
+              disabled={busy || lost}
               className="self-end rounded-md bg-zinc-900 px-4 py-2 font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
             >
               Send

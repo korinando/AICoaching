@@ -1,4 +1,4 @@
-"""The live interview WebSocket (Week 4 Step 2). The messages are in ws_messages.py.
+"""The live interview WebSocket (Week 4 Steps 2, 5 and 7). The messages are in ws_messages.py.
 
 A reply goes out sentence by sentence. Each sentence's text is sent as soon as it's complete and
 its voice starts at the same moment, while a second task sends the finished voices in order.
@@ -9,6 +9,9 @@ interview:
   freeze every other connection on the server. Each stage runs in a thread instead.
 - The database connection goes back to the pool after every step (each one ends with a
   commit), so an interview doesn't hold one while the candidate is talking.
+
+Once the server has an answer, it finishes the reply and saves it even if the candidate has left
+(a refresh, a lost connection), so nothing they said is lost. See send and answers_running.
 """
 
 import asyncio
@@ -20,18 +23,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.concurrency import (
-    iterate_in_threadpool,  # replaces the old line
-    run_in_threadpool,
-)
+from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.websockets import WebSocketState
 
 from app.agent.interviewer import Interviewer
 from app.agent.schemas import InterviewState
 from app.api.deps import DB, AudioStorageDep, InterviewerDep, SpeechToTextDep, TextToSpeechDep
 from app.api.ws_messages import (
+    AnswerInProgress,
     AudioChunk,
     Auth,
     EndSession,
@@ -57,9 +59,9 @@ from app.services.interviews import (
 from app.services.recordings import ProcessedRecording, RecordingError, process_recording
 from app.speech.audio import join_wavs
 from app.speech.sentences import split_sentences
-from app.speech.storage import AudioStorage, StorageError, new_audio_key  # replaces the old line
+from app.speech.storage import AudioStorage, StorageError, new_audio_key
 from app.speech.stt import SpeechToText
-from app.speech.tts import TextToSpeech, TextToSpeechError  # replaces the old line
+from app.speech.tts import TextToSpeech, TextToSpeechError
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,12 @@ CLOSE_UNAUTHORIZED = 4401
 CLOSE_NOT_FOUND = 4404
 
 CLOSED_MESSAGE = "This interview has already finished."
+BUSY_MESSAGE = "Your last answer is still being worked on. Please wait for the reply."
+ANSWER_POLL_SECONDS = 0.1
+
+# Sessions with an answer being worked on right now. Kept in this process's memory, so it only
+# works with one server process: more than one would need something shared, like Redis.
+answers_running: set[int] = set()
 RECORDING_ERROR_CODE: dict[str, ErrorCode] = {
     "too_large": "invalid_audio",
     "empty": "invalid_audio",
@@ -140,6 +148,11 @@ class Interview:
         next_turn = len(session.turns)
         self.db.commit()
         return next_turn
+
+    def last_turn(self) -> int:
+        last_turn = len(self._session().turns) - 1
+        self.db.commit()
+        return last_turn
 
     def transcribe(self, data: bytes) -> ProcessedRecording:
         try:
@@ -212,13 +225,25 @@ class Interview:
 
 
 async def send(websocket: WebSocket, message: ServerMessage) -> None:
-    await websocket.send_text(message.model_dump_json())
+    """Does nothing once the candidate has left: the work carries on, and they see the result
+    when they come back."""
+    if websocket.application_state != WebSocketState.CONNECTED:
+        return
+    try:
+        await websocket.send_text(message.model_dump_json())
+    except WebSocketDisconnect:
+        logger.info("A candidate left while a message was on its way")
+
+
+async def close(websocket: WebSocket, code: int = 1000) -> None:
+    if websocket.application_state == WebSocketState.CONNECTED:
+        await websocket.close(code)
 
 
 async def reject(websocket: WebSocket, code: ErrorCode, message: str, close_code: int) -> None:
     """Say why first: a browser's close event can't carry a useful message for the user."""
     await send(websocket, ErrorMessage(code=code, message=message))
-    await websocket.close(close_code)
+    await close(websocket, close_code)
 
 
 def user_id_from(frame: dict[str, Any]) -> int | None:
@@ -251,6 +276,21 @@ async def authenticate(websocket: WebSocket, interview: Interview) -> bool:
     return True
 
 
+async def wait_for_running_answer(websocket: WebSocket, interview: Interview) -> None:
+    """The candidate came back while their answer from before is still being worked on.
+
+    turn_complete tells the page to load the saved turns. A simple loop and not an event: the wait
+    is short, and there's nothing to clean up.
+    """
+    if interview.session_id not in answers_running:
+        return
+    await send(websocket, AnswerInProgress())
+    while interview.session_id in answers_running:
+        await asyncio.sleep(ANSWER_POLL_SECONDS)
+    last_turn = await run_in_threadpool(interview.last_turn)
+    await send(websocket, TurnComplete(turn_index=last_turn))
+
+
 async def send_audio_in_order(
     websocket: WebSocket, turn_index: int, voices: asyncio.Queue
 ) -> list[SpokenSentence]:
@@ -279,6 +319,18 @@ async def answer(
     recording: bytes | None = None,
 ) -> bool:
     """One answer, typed or spoken, through to the whole reply. True if the interview ended."""
+    if interview.session_id in answers_running:
+        raise Rejected("busy", BUSY_MESSAGE)
+    answers_running.add(interview.session_id)
+    try:
+        return await _work_on_answer(websocket, interview, text, recording)
+    finally:
+        answers_running.discard(interview.session_id)
+
+
+async def _work_on_answer(
+    websocket: WebSocket, interview: Interview, text: str | None, recording: bytes | None
+) -> bool:
     started = time.perf_counter()
     turn_index = await run_in_threadpool(interview.next_turn)
     audio_key, stt_ms = None, None
@@ -350,30 +402,24 @@ async def interview_socket(
     """Answers are handled one at a time, in the order they arrive."""
     interview = Interview(session_id, db, interviewer, storage, speech_to_text, tts)
     await websocket.accept()  # first, or we couldn't receive the token or explain a refusal
-    try:
-        if not await authenticate(websocket, interview):
+    if not await authenticate(websocket, interview):
+        return
+    await wait_for_running_answer(websocket, interview)
+    while True:
+        frame = await websocket.receive()
+        if frame["type"] == "websocket.disconnect":
             return
-        while True:
-            frame = await websocket.receive()
-            if frame["type"] == "websocket.disconnect":
+        try:
+            ended = await handle_frame(websocket, interview, frame)
+        except Rejected as e:
+            await send(websocket, ErrorMessage(code=e.code, message=e.message))
+        except Exception:
+            # One failed answer shouldn't end the interview: what's committed stays saved.
+            logger.exception("Session %s: answer failed", session_id)
+            await run_in_threadpool(db.rollback)
+            message = "Something went wrong. Please try again."
+            await send(websocket, ErrorMessage(code="server_error", message=message))
+        else:
+            if ended:
+                await close(websocket)
                 return
-            try:
-                ended = await handle_frame(websocket, interview, frame)
-            except Rejected as e:
-                await send(websocket, ErrorMessage(code=e.code, message=e.message))
-            except WebSocketDisconnect:
-                raise
-            except Exception:
-                # One failed answer shouldn't end the interview: what's committed stays saved.
-                logger.exception("Session %s: answer failed", session_id)
-                await run_in_threadpool(db.rollback)
-                message = "Something went wrong. Please try again."
-                await send(websocket, ErrorMessage(code="server_error", message=message))
-            else:
-                if ended:
-                    await websocket.close()
-                    return
-    except WebSocketDisconnect:
-        # The candidate left while a reply was on its way. Anything committed stays saved, and
-        # GET /sessions/{id} shows it when they come back.
-        logger.info("Session %s: disconnected", session_id)

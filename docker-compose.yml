@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:17
+    restart: unless-stopped # back by itself when Docker starts, unless I stopped it
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -19,6 +20,7 @@ services:
   # exist. Code only uses the S3 API, so this can be swapped by changing a URL.
   storage:
     image: chrislusf/seaweedfs:4.50
+    restart: unless-stopped
     # mini = all parts in one process, for development. -bucket creates them at startup.
     command: mini -dir=/data -bucket=ai-coach-recordings,ai-coach-test
     environment:

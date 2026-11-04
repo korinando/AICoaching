@@ -1,5 +1,6 @@
 """The live interview WebSocket /ws/sessions/{id} (Week 4 Step 2)."""
 
+import asyncio
 import base64
 import io
 import threading
@@ -7,9 +8,9 @@ import wave
 from datetime import timedelta
 
 import pytest
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from app.agent.interviewer import CLOSING_TEXT, REPEAT_TEXT
+from app.agent.interviewer import CLOSING_TEXT, REPEAT_TEXT, Interviewer
 from app.agent.llm_client import LLMError
 from app.api import ws as ws_api
 from app.api.deps import get_speech_to_text
@@ -31,6 +32,12 @@ def speech(client) -> FakeSpeechToText:
     fake = FakeSpeechToText()
     app.dependency_overrides[get_speech_to_text] = lambda: fake
     return fake
+
+
+@pytest.fixture(autouse=True)
+def no_answers_running():
+    yield
+    ws_api.answers_running.clear()
 
 
 @pytest.fixture
@@ -501,3 +508,125 @@ def test_answer_saved_by_another_tab_while_streaming_is_busy(
             pass
 
     assert message["code"] == "busy"
+
+
+# --- Leaving and coming back (Step 7) ------------------------------------------------------------
+
+
+class LeavingSocket:
+    """A connection that drops after some messages, the way Starlette reports it. TestClient can't
+    do this: it accepts sends after the client has gone, so a test would pass either way."""
+
+    def __init__(self, messages_before_leaving: int) -> None:
+        self.left = messages_before_leaving
+        self.application_state = WebSocketState.CONNECTED
+        self.received: list[str] = []
+        self.closed = False
+
+    async def send_text(self, text: str) -> None:
+        if self.left == 0:
+            self.application_state = WebSocketState.DISCONNECTED
+            raise WebSocketDisconnect(code=1006)
+        self.left -= 1
+        self.received.append(text)
+
+    async def close(self, code: int = 1000) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    "messages_before_leaving",
+    [0, 1, 2, 3],
+    ids=["before_transcript", "after_transcript", "after_text", "after_audio"],
+)
+def test_reply_is_finished_and_saved_after_the_candidate_leaves(
+    db, session_id, fake_llm, tts, storage, speech, messages_before_leaving
+):
+    fake_llm.script.append(streamed("follow_up", f"{FIRST} {SECOND}"))
+    socket = LeavingSocket(messages_before_leaving)
+    interview = ws_api.Interview(session_id, db, Interviewer(fake_llm), storage, speech, tts)
+
+    ended = asyncio.run(ws_api.answer(socket, interview, text=ANSWER))
+
+    assert not ended
+    assert session_id not in ws_api.answers_running
+    assert len(socket.received) == messages_before_leaving
+    _opening, saved_answer, reply = turns_in(db, session_id)
+    assert saved_answer.text == ANSWER
+    assert reply.text == f"{FIRST} {SECOND}"
+    assert reply.audio_url in storage.files  # the replay works when they come back
+    assert db.get(InterviewSession, session_id).agent_state["follow_ups_on_current"] == 1
+
+
+def test_spoken_answer_is_saved_after_the_candidate_leaves(
+    db, session_id, fake_llm, tts, storage, speech, audio_samples
+):
+    fake_llm.script.append(streamed("follow_up", REPLY))
+    interview = ws_api.Interview(session_id, db, Interviewer(fake_llm), storage, speech, tts)
+
+    asyncio.run(ws_api.answer(LeavingSocket(0), interview, recording=audio_samples["webm"]))
+
+    _opening, saved_answer, reply = turns_in(db, session_id)
+    assert saved_answer.audio_url in storage.files
+    assert reply.text == REPLY
+
+
+def test_closing_a_connection_that_has_gone_does_nothing():
+    socket = LeavingSocket(0)
+    socket.application_state = WebSocketState.DISCONNECTED
+
+    asyncio.run(ws_api.close(socket))
+
+    assert not socket.closed
+
+
+def test_coming_back_while_the_answer_is_running_waits_for_it(
+    client, session_id, token, fake_llm, monkeypatch
+):
+    monkeypatch.setattr(ws_api, "ANSWER_POLL_SECONDS", 0.01)
+    ws_api.answers_running.add(session_id)
+    fake_llm.script.append(streamed("follow_up", REPLY))
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        assert socket.receive_json() == {"type": "answer_in_progress"}
+
+        ws_api.answers_running.discard(session_id)
+        assert socket.receive_json() == {"type": "turn_complete", "turn_index": 0}
+
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        assert messages_of_one_reply(socket)[1]["text"] == REPLY
+
+
+def test_second_answer_while_one_is_running_is_busy(client, db, session_id, token, fake_llm):
+    """Another tab, or a page that came back. Told at once, before any work is done."""
+    fake_llm.script.append(streamed("follow_up", REPLY))
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_text("not json")  # the reply proves the login has been handled
+        assert socket.receive_json()["code"] == "invalid_message"
+
+        ws_api.answers_running.add(session_id)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        assert socket.receive_json()["code"] == "busy"
+        assert len(turns_in(db, session_id)) == 1
+
+        ws_api.answers_running.discard(session_id)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        assert messages_of_one_reply(socket)[1]["text"] == REPLY
+
+
+def test_a_refused_recording_does_not_leave_the_session_busy(
+    client, session_id, token, fake_llm, speech, audio_samples
+):
+    speech.text = ""
+    fake_llm.script.append(streamed("follow_up", REPLY))
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_bytes(audio_samples["webm"])
+        assert socket.receive_json()["code"] == "no_speech"
+
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        assert messages_of_one_reply(socket)[1]["text"] == REPLY

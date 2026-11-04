@@ -3,8 +3,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 
 from app.api import auth, health, sessions, templates, ws
 from app.core.config import get_settings
@@ -31,6 +33,17 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.exception_handler(OperationalError)
+def database_unavailable(_request: Request, _error: OperationalError) -> JSONResponse:
+    """The database can't be reached. Say so, instead of a confusing 500."""
+    return JSONResponse(
+        {"detail": "Database unavailable. Please try again in a moment."},
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(templates.router)

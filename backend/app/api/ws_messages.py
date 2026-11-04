@@ -104,6 +104,13 @@ class TurnComplete(BaseModel):
     turn_index: int
 
 
+class AnswerInProgress(BaseModel):
+    """Sent on connecting: an answer from before a refresh or a lost connection is still being
+    worked on. A turn_complete follows when it's saved."""
+
+    type: Literal["answer_in_progress"] = "answer_in_progress"
+
+
 class SessionEnded(BaseModel):
     """The interview is over. Week 5 starts generating the report at this point."""
 
@@ -120,5 +127,11 @@ class ErrorMessage(BaseModel):
 
 
 ServerMessage = (
-    Transcript | InterviewerText | AudioChunk | TurnComplete | SessionEnded | ErrorMessage
+    Transcript
+    | InterviewerText
+    | AudioChunk
+    | TurnComplete
+    | AnswerInProgress
+    | SessionEnded
+    | ErrorMessage
 )

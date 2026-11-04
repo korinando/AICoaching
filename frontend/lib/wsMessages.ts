@@ -37,5 +37,6 @@ export type ServerMessage =
       audio_base64: string;
     }
   | { type: "turn_complete"; turn_index: number }
+  | { type: "answer_in_progress" }
   | { type: "session_ended"; status: Exclude<SessionStatus, "in_progress"> }
   | { type: "error"; code: ErrorCode; message: string };

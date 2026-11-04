@@ -10,8 +10,8 @@ function toBlobUrl(base64: string): string {
 }
 
 /** Plays sentences one after another: each starts when the last one has ended, so they never
- * overlap. <audio> elements, the same as the replay button: the Web Audio API reported that it
- * was playing but was silent on a real browser (Week 4 Step 6). */
+ * overlap. <audio> elements, the same as the replay button: simple, and play() resolves when the
+ * sound has really started, which is what the first-audio measurement needs. */
 class AudioQueue {
   private waiting: Sentence[] = [];
   private current: { audio: HTMLAudioElement; url: string } | null = null;

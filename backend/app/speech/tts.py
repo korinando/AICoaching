@@ -26,6 +26,7 @@ class PiperTextToSpeech:
     def __init__(self, voice_path: Path) -> None:
         self.voice_path = voice_path
         self._voice: PiperVoice | None = None
+        # Sentences are spoken at the same time. Without this, each would load its own voice.
         self._load_lock = threading.Lock()
 
     def synthesize(self, text: str) -> bytes:
