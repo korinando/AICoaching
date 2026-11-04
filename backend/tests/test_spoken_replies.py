@@ -7,7 +7,7 @@ from app.core.security import create_token
 from app.models import User
 from app.speech.storage import StorageError
 from app.speech.tts import TextToSpeechError
-from tests.fakes import ANSWER, decision
+from tests.fakes import ANSWER, decision, spoken
 
 OPENING = "Welcome! What is REST?"
 REPLY = "Why stateless?"
@@ -38,7 +38,7 @@ def test_opening_question_is_spoken(client, auth_headers, session_id, tts):
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
-    assert response.content == f"spoken: {OPENING}".encode()
+    assert response.content == spoken(OPENING)
 
 
 def test_only_the_reply_is_spoken_not_my_answer(client, auth_headers, session_id, fake_llm, tts):
@@ -50,7 +50,7 @@ def test_only_the_reply_is_spoken_not_my_answer(client, auth_headers, session_id
     typed_answer, reply = response.json()["turns"]
     assert typed_answer["has_audio"] is False
     assert reply["has_audio"] is True
-    assert get_audio(client, session_id, 2, auth_headers).content == f"spoken: {REPLY}".encode()
+    assert get_audio(client, session_id, 2, auth_headers).content == spoken(REPLY)
 
 
 def test_fixed_rule_replies_are_spoken_too(client, auth_headers, session_id, tts):

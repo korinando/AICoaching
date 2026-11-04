@@ -1,7 +1,7 @@
 """The live interview WebSocket (Week 4 Step 2). The messages are in ws_messages.py.
 
-A reply is still generated whole and sent as one piece (seq 0), so this works from end to end
-before streaming exists. Steps 3-5 replace Interview.think and Interview.speak.
+A reply goes out sentence by sentence. Each sentence's text is sent as soon as it's complete and
+its voice starts at the same moment, while a second task sends the finished voices in order.
 
 Two things differ from a normal request, because this connection stays open for a whole
 interview:
@@ -15,16 +15,21 @@ import asyncio
 import base64
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.concurrency import run_in_threadpool
+from fastapi.concurrency import (
+    iterate_in_threadpool,  # replaces the old line
+    run_in_threadpool,
+)
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agent.interviewer import Interviewer
+from app.agent.schemas import InterviewState
 from app.api.deps import DB, AudioStorageDep, InterviewerDep, SpeechToTextDep, TextToSpeechDep
 from app.api.ws_messages import (
     AudioChunk,
@@ -46,13 +51,15 @@ from app.services.interviews import (
     InterviewClosedError,
     abandon_interview,
     elapsed_ms,
-    speak_turns,
-    submit_answer,
+    load_state,
+    save_answer,
 )
 from app.services.recordings import ProcessedRecording, RecordingError, process_recording
-from app.speech.storage import AudioStorage, StorageError
+from app.speech.audio import join_wavs
+from app.speech.sentences import split_sentences
+from app.speech.storage import AudioStorage, StorageError, new_audio_key  # replaces the old line
 from app.speech.stt import SpeechToText
-from app.speech.tts import TextToSpeech
+from app.speech.tts import TextToSpeech, TextToSpeechError  # replaces the old line
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +92,22 @@ class Rejected(Exception):
 
 
 @dataclass
-class Reply:
-    turn_index: int
-    text: str
-    status: str
+class ReplyStream:
+    """A reply on its way. state only has the answer and reply once sentences has been read."""
+
+    state: InterviewState
+    first_new: int
+    sentences: Iterator[str]
+
+    @property
+    def turn_index(self) -> int:
+        return self.first_new + 1  # first_new is the answer, and the reply comes right after it
+
+
+@dataclass
+class SpokenSentence:
+    wav: bytes
+    tts_ms: int
 
 
 @dataclass
@@ -128,36 +147,62 @@ class Interview:
         except RecordingError as e:
             raise Rejected(RECORDING_ERROR_CODE[e.reason], e.message) from None
 
-    def think(self, text: str, audio_key: str | None, stt_ms: int | None) -> Reply:
+    def begin_reply(self, text: str) -> ReplyStream:
+        """Nothing runs yet: split_sentences and stream_answer are generators."""
+        state = load_state(self._session())
+        self.db.commit()  # the database connection goes back while Gemini is talking
+        sentences = split_sentences(self.interviewer.stream_answer(state, text))
+        return ReplyStream(state, len(state.history), sentences)
+
+    def voice(self, sentence: str) -> SpokenSentence | None:
+        """One sentence as a WAV file, or None if the voice failed: the text was already sent.
+
+        Several of these run at once, so this must not touch self.db: a Session is for one
+        thread at a time.
+        """
+        started = time.perf_counter()
+        try:
+            wav = self.tts.synthesize(sentence)
+        except TextToSpeechError as e:
+            logger.warning("Session %s has no audio for a sentence: %s", self.session_id, e)
+            return None
+        return SpokenSentence(wav, elapsed_ms(started))
+
+    def save_reply(
+        self, reply: ReplyStream, audio_key: str | None, stt_ms: int | None, llm_ms: int
+    ) -> str:
+        """Save the answer and reply, once the whole reply is known. Returns the new status."""
         session = self._session()
         try:
-            submit_answer(self.db, session, text, self.interviewer, audio_key, stt_ms)
+            save_answer(self.db, session, reply.state, reply.first_new, audio_key, stt_ms, llm_ms)
         except InterviewClosedError:
             raise Rejected("interview_closed", CLOSED_MESSAGE) from None
         except IntegrityError:
-            # Another tab saved an answer for the same turn first (see submit_answer).
+            # Another tab saved an answer for the same turn first (see save_answer).
             self.db.rollback()
             raise Rejected(
                 "busy", "Another answer was saved first. Reload the interview."
             ) from None
-        reply = Reply(session.turns[-1].turn_index, session.turns[-1].text, session.status)
+        status = session.status
         self.db.commit()
-        return reply
+        return status
 
-    def speak(self, turn_index: int, started: float) -> bytes | None:
-        """The reply as a WAV file, or None if the voice failed: the text was already sent."""
+    def keep_voice(self, turn_index: int, spoken: list[SpokenSentence], started: float) -> None:
+        """Store the sentences as one file for the replay button, and save the timings."""
         session = self._session()
         turn = session.turns[turn_index]
-        speak_turns(self.db, session, [turn], self.tts, self.storage)
-        wav = None
-        if turn.audio_url is not None:
+        if spoken:
+            turn.tts_ms = sum(sentence.tts_ms for sentence in spoken)
             try:
-                wav = self.storage.load(turn.audio_url)
+                key = new_audio_key(self.session_id)
+                self.storage.save(key, join_wavs([s.wav for s in spoken]), "audio/wav")
             except StorageError as e:
+                # The candidate heard it already: only the replay button is lost.
                 logger.warning("Session %s turn %s: %s", self.session_id, turn_index, e)
+            else:
+                turn.audio_url = key
         turn.total_latency_ms = elapsed_ms(started)
         self.db.commit()
-        return wav
 
     def abandon(self) -> None:
         try:
@@ -206,6 +251,27 @@ async def authenticate(websocket: WebSocket, interview: Interview) -> bool:
     return True
 
 
+async def send_audio_in_order(
+    websocket: WebSocket, turn_index: int, voices: asyncio.Queue
+) -> list[SpokenSentence]:
+    """Send each sentence's voice, in the order they were queued, until the None at the end.
+
+    Each item is a task that's already running. Waiting for them one at a time doesn't slow them
+    down: if the second finishes first, it's simply ready when its turn comes.
+    """
+    spoken = []
+    seq = 0
+    while (voice := await voices.get()) is not None:
+        sentence = await voice
+        if sentence is not None:
+            # b64encode gives bytes; JSON needs text.
+            audio = base64.b64encode(sentence.wav).decode("ascii")
+            await send(websocket, AudioChunk(turn_index=turn_index, seq=seq, audio_base64=audio))
+            spoken.append(sentence)
+        seq += 1
+    return spoken
+
+
 async def answer(
     websocket: WebSocket,
     interview: Interview,
@@ -221,19 +287,34 @@ async def answer(
         text, audio_key, stt_ms = processed.text, processed.audio_key, processed.stt_ms
     await send(websocket, Transcript(turn_index=turn_index, text=text))
 
-    reply = await run_in_threadpool(interview.think, text, audio_key, stt_ms)
-    await send(websocket, InterviewerText(turn_index=reply.turn_index, seq=0, text=reply.text))
+    reply = await run_in_threadpool(interview.begin_reply, text)
+    voices: asyncio.Queue = asyncio.Queue()
+    # A task of its own: the loop below spends most of its time waiting for Gemini, and a finished
+    # voice shouldn't have to wait for the next sentence.
+    sender = asyncio.create_task(send_audio_in_order(websocket, reply.turn_index, voices))
+    try:
+        thinking = time.perf_counter()
+        seq = 0
+        # The generators wait on the network, so each next() runs in a thread.
+        async for sentence in iterate_in_threadpool(reply.sentences):
+            message = InterviewerText(turn_index=reply.turn_index, seq=seq, text=sentence)
+            await send(websocket, message)
+            voices.put_nowait(asyncio.create_task(run_in_threadpool(interview.voice, sentence)))
+            seq += 1
+        llm_ms = elapsed_ms(thinking)
+        voices.put_nowait(None)
+        # Saved before waiting for the voices: if one crashes, the answer isn't lost.
+        status = await run_in_threadpool(interview.save_reply, reply, audio_key, stt_ms, llm_ms)
+        spoken = await sender
+    finally:
+        sender.cancel()  # does nothing if it finished; otherwise it must not outlive the reply
 
-    wav = await run_in_threadpool(interview.speak, reply.turn_index, started)
-    if wav is not None:
-        # b64encode gives bytes; JSON needs text.
-        audio = base64.b64encode(wav).decode("ascii")
-        await send(websocket, AudioChunk(turn_index=reply.turn_index, seq=0, audio_base64=audio))
+    await run_in_threadpool(interview.keep_voice, reply.turn_index, spoken, started)
     await send(websocket, TurnComplete(turn_index=reply.turn_index))
 
-    if reply.status == "in_progress":
+    if status == "in_progress":
         return False
-    await send(websocket, SessionEnded(status=reply.status))
+    await send(websocket, SessionEnded(status=status))
     return True
 
 

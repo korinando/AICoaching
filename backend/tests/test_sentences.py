@@ -50,3 +50,11 @@ from app.speech.sentences import split_sentences
 )
 def test_split_sentences(pieces, sentences):
     assert list(split_sentences(pieces)) == sentences
+
+
+def test_first_sentence_arrives_before_the_next_piece_is_read():
+    def pieces():
+        yield "This is the first sentence. And"
+        raise AssertionError("read too far: this would not be streaming")
+
+    assert next(split_sentences(pieces())) == "This is the first sentence."

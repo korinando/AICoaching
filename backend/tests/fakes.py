@@ -1,3 +1,5 @@
+import io
+import wave
 from collections.abc import Iterator
 
 from app.agent.schemas import Action, AgentDecision
@@ -61,7 +63,7 @@ class FakeTextToSpeech:
         self.calls.append(text)
         if self.error:
             raise self.error
-        return f"spoken: {text}".encode()
+        return spoken(text)
 
 
 class FakeSpeechToText:
@@ -82,3 +84,17 @@ class FakeSpeechToText:
 def decision(action: Action, text: str = "Scripted reply.") -> AgentDecision:
     """A scripted AgentDecision for FakeLLMClient."""
     return AgentDecision(action=action, reasoning="test", text=text)
+
+
+def streamed(action: Action, text: str = "Scripted reply.") -> list[str]:
+    """A scripted streaming reply for FakeLLMClient: the ACTION line, then the text."""
+    return [f"ACTION: {action}\n{text}"]
+
+
+def spoken(text: str) -> bytes:
+    """What FakeTextToSpeech returns: a real WAV file, whose samples are the text's bytes."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setparams((1, 1, 16_000, 0, "NONE", "not compressed"))
+        wav_file.writeframes(text.encode())
+    return buffer.getvalue()

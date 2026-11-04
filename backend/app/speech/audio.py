@@ -72,3 +72,15 @@ def wav_duration_seconds(wav: bytes) -> float:
     """Length of a WAV file: number of samples / samples per second."""
     with wave.open(io.BytesIO(wav)) as w:
         return w.getnframes() / w.getframerate()
+
+
+def join_wavs(wavs: list[bytes]) -> bytes:
+    """One WAV file from several in the same format, by copying their samples in order."""
+    output = io.BytesIO()
+    with wave.open(output, "wb") as joined:
+        for index, wav in enumerate(wavs):
+            with wave.open(io.BytesIO(wav)) as part:
+                if index == 0:
+                    joined.setparams(part.getparams())
+                joined.writeframes(part.readframes(part.getnframes()))
+    return output.getvalue()

@@ -1,6 +1,7 @@
 """Text-to-speech with Piper, running locally on the CPU (Week 3 Step 6)."""
 
 import io
+import threading
 import wave
 from pathlib import Path
 from typing import Protocol
@@ -25,16 +26,18 @@ class PiperTextToSpeech:
     def __init__(self, voice_path: Path) -> None:
         self.voice_path = voice_path
         self._voice: PiperVoice | None = None
+        self._load_lock = threading.Lock()
 
     def synthesize(self, text: str) -> bytes:
         try:
-            if self._voice is None:
-                if not self.voice_path.exists():
-                    raise FileNotFoundError(
-                        f"{self.voice_path} is missing. From backend/ run: uv run python -m "
-                        f"piper.download_voices {self.voice_path.stem} --data-dir voices"
-                    )
-                self._voice = PiperVoice.load(self.voice_path)
+            with self._load_lock:
+                if self._voice is None:
+                    if not self.voice_path.exists():
+                        raise FileNotFoundError(
+                            f"{self.voice_path} is missing. From backend/ run: uv run python -m "
+                            f"piper.download_voices {self.voice_path.stem} --data-dir voices"
+                        )
+                    self._voice = PiperVoice.load(self.voice_path)
             buffer = io.BytesIO()
             with wave.open(buffer, "wb") as wav_file:
                 self._voice.synthesize_wav(text, wav_file)

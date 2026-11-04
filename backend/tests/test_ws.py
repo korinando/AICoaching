@@ -1,12 +1,16 @@
 """The live interview WebSocket /ws/sessions/{id} (Week 4 Step 2)."""
 
 import base64
+import io
+import threading
+import wave
 from datetime import timedelta
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from app.agent.interviewer import CLOSING_TEXT
+from app.agent.interviewer import CLOSING_TEXT, REPEAT_TEXT
+from app.agent.llm_client import LLMError
 from app.api import ws as ws_api
 from app.api.deps import get_speech_to_text
 from app.api.schemas import MAX_ANSWER_CHARS
@@ -17,7 +21,7 @@ from app.services import recordings
 from app.speech.storage import StorageError
 from app.speech.stt import SpeechToTextError
 from app.speech.tts import TextToSpeechError
-from tests.fakes import ANSWER, FakeSpeechToText, decision
+from tests.fakes import ANSWER, FakeSpeechToText, decision, spoken, streamed
 
 REPLY = "Why would you add it?"
 
@@ -51,9 +55,9 @@ def login(socket, token):
 
 
 def messages_of_one_reply(socket) -> list[dict]:
-    """All messages of one reply, up to and including turn_complete."""
+    """All messages of one reply, up to turn_complete, or an error so a failing test can't hang."""
     messages = []
-    while not messages or messages[-1]["type"] != "turn_complete":
+    while not messages or messages[-1]["type"] not in ("turn_complete", "error"):
         messages.append(socket.receive_json())
     return messages
 
@@ -129,7 +133,7 @@ def test_other_users_session_looks_like_a_missing_one(client, db, session_id, to
 
 
 def test_typed_answer_gets_the_reply_in_order(client, db, session_id, token, fake_llm, tts):
-    fake_llm.script.append(decision("follow_up", text=REPLY))
+    fake_llm.script.append(streamed("follow_up", REPLY))
 
     with connect(client, session_id) as socket:
         login(socket, token)
@@ -145,7 +149,7 @@ def test_typed_answer_gets_the_reply_in_order(client, db, session_id, token, fak
     assert messages[0] == {"type": "transcript", "turn_index": 1, "text": ANSWER}
     assert messages[1] == {"type": "interviewer_text", "turn_index": 2, "seq": 0, "text": REPLY}
     assert messages[2]["seq"] == 0
-    assert base64.b64decode(messages[2]["audio_base64"]) == f"spoken: {REPLY}".encode()
+    assert base64.b64decode(messages[2]["audio_base64"]) == spoken(REPLY)
 
     _opening, saved_answer, reply = turns_in(db, session_id)
     assert saved_answer.text == ANSWER
@@ -154,7 +158,7 @@ def test_typed_answer_gets_the_reply_in_order(client, db, session_id, token, fak
 
 
 def test_recording_gets_the_reply(client, db, session_id, token, fake_llm, audio_samples, storage):
-    fake_llm.script.append(decision("follow_up", text=REPLY))
+    fake_llm.script.append(streamed("follow_up", REPLY))
 
     with connect(client, session_id) as socket:
         login(socket, token)
@@ -169,7 +173,7 @@ def test_recording_gets_the_reply(client, db, session_id, token, fake_llm, audio
 
 
 def test_several_answers_on_one_connection(client, session_id, token, fake_llm):
-    fake_llm.script.extend([decision("follow_up"), decision("follow_up")])
+    fake_llm.script.extend([streamed("follow_up"), streamed("follow_up")])
 
     with connect(client, session_id) as socket:
         login(socket, token)
@@ -180,7 +184,7 @@ def test_several_answers_on_one_connection(client, session_id, token, fake_llm):
 
 def test_voice_failure_still_sends_the_text(client, session_id, token, fake_llm, tts):
     tts.error = TextToSpeechError("voice file missing")
-    fake_llm.script.append(decision("follow_up", text=REPLY))
+    fake_llm.script.append(streamed("follow_up", REPLY))
 
     with connect(client, session_id) as socket:
         login(socket, token)
@@ -190,18 +194,17 @@ def test_voice_failure_still_sends_the_text(client, session_id, token, fake_llm,
     assert [m["type"] for m in messages] == ["transcript", "interviewer_text", "turn_complete"]
 
 
-def test_storage_failure_on_the_reply_still_sends_the_text(
-    client, session_id, token, fake_llm, storage
-):
+def test_storage_failure_only_loses_the_replay(client, db, session_id, token, fake_llm, storage):
     storage.error = StorageError("connection refused")
-    fake_llm.script.append(decision("follow_up", text=REPLY))
+    fake_llm.script.append(streamed("follow_up", REPLY))
 
     with connect(client, session_id) as socket:
         login(socket, token)
         socket.send_json({"type": "text_answer", "text": ANSWER})
         messages = messages_of_one_reply(socket)
 
-    assert "audio_chunk" not in [m["type"] for m in messages]
+    assert "audio_chunk" in [m["type"] for m in messages]
+    assert turns_in(db, session_id)[-1].audio_url is None
 
 
 # --- Messages that can't be handled: an error, and the connection stays open ---------------------
@@ -256,7 +259,7 @@ def test_unusable_audio_is_invalid_audio(client, session_id, token, audio_sample
 def test_bad_message_gets_an_error_and_the_connection_stays_open(
     client, session_id, token, fake_llm, raw
 ):
-    fake_llm.script.append(decision("follow_up", text=REPLY))
+    fake_llm.script.append(streamed("follow_up", REPLY))
 
     with connect(client, session_id) as socket:
         login(socket, token)
@@ -268,16 +271,17 @@ def test_bad_message_gets_an_error_and_the_connection_stays_open(
 
 
 def test_unexpected_crash_is_a_server_error_and_the_interview_continues(
-    client, session_id, token, fake_llm, tts
+    client, db, session_id, token, fake_llm, tts
 ):
     tts.error = RuntimeError("a bug, not a known failure")
-    fake_llm.script.extend([decision("follow_up"), decision("follow_up", text=REPLY)])
+    fake_llm.script.extend([streamed("follow_up"), streamed("follow_up", REPLY)])
 
     with connect(client, session_id) as socket:
         login(socket, token)
         socket.send_json({"type": "text_answer", "text": ANSWER})
         messages = [socket.receive_json() for _ in range(3)]
         assert messages[-1]["code"] == "server_error"
+        assert len(turns_in(db, session_id)) == 3  # the answer and reply are still saved
 
         tts.error = None
         socket.send_json({"type": "text_answer", "text": ANSWER})
@@ -306,7 +310,7 @@ def test_agent_finishing_the_interview_ends_the_session(client, db, token, sessi
     session = db.get(InterviewSession, session_id)
     session.agent_state = {**session.agent_state, "current_topic_index": 4}
     db.flush()
-    fake_llm.script.append(decision("end", text=CLOSING_TEXT))
+    fake_llm.script.append(streamed("end", CLOSING_TEXT))
 
     with connect(client, session_id) as socket:
         login(socket, token)
@@ -337,3 +341,163 @@ def test_finished_interview_takes_nothing_more(client, db, session_id, token, sp
         assert socket.receive_json()["code"] == "interview_closed"
 
     assert speech.calls == []
+
+
+# --- Sentence by sentence (Step 5) ---------------------------------------------------------------
+
+FIRST = "This is the first sentence."
+SECOND = "This is the second sentence?"
+TIMEOUT_S = 5
+
+
+def audio_seqs(messages) -> list[int]:
+    return [m["seq"] for m in messages if m["type"] == "audio_chunk"]
+
+
+def test_each_sentence_gets_its_own_text_and_voice(client, session_id, token, fake_llm):
+    fake_llm.script.append(["ACTION: follow_up\nThis is the fi", f"rst sentence. {SECOND}"])
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        messages = messages_of_one_reply(socket)
+
+    texts = [m for m in messages if m["type"] == "interviewer_text"]
+    assert [(m["seq"], m["text"]) for m in texts] == [(0, FIRST), (1, SECOND)]
+    chunks = [m for m in messages if m["type"] == "audio_chunk"]
+    assert [base64.b64decode(c["audio_base64"]) for c in chunks] == [spoken(FIRST), spoken(SECOND)]
+
+
+def test_saved_turn_has_the_whole_reply_and_one_voice_file(
+    client, db, session_id, token, fake_llm, storage
+):
+    fake_llm.script.append(streamed("follow_up", f"{FIRST} {SECOND}"))
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        messages_of_one_reply(socket)
+
+    reply = turns_in(db, session_id)[-1]
+    assert reply.text == f"{FIRST} {SECOND}"
+    with wave.open(io.BytesIO(storage.files[reply.audio_url][0])) as joined:
+        assert joined.readframes(joined.getnframes()) == f"{FIRST}{SECOND}".encode()
+    assert reply.tts_ms is not None
+    assert reply.total_latency_ms is not None
+    assert db.get(InterviewSession, session_id).agent_state["follow_ups_on_current"] == 1
+
+
+def test_voices_run_together_but_arrive_in_order(client, session_id, token, fake_llm, tts):
+    """The first voice can't finish until the second has: one at a time, this would time out."""
+    second_done = threading.Event()
+    speak = tts.synthesize
+
+    def slow_first(text):
+        if text == FIRST:
+            assert second_done.wait(TIMEOUT_S), "the voices didn't run at the same time"
+        result = speak(text)
+        if text == SECOND:
+            second_done.set()
+        return result
+
+    tts.synthesize = slow_first
+    fake_llm.script.append(streamed("follow_up", f"{FIRST} {SECOND}"))
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        messages = messages_of_one_reply(socket)
+
+    assert audio_seqs(messages) == [0, 1]
+
+
+def test_first_voice_is_sent_before_the_reply_has_finished(client, session_id, token, fake_llm):
+    """Gemini can't continue until the test has received the first voice."""
+    first_voice_arrived = threading.Event()
+
+    def pieces():
+        yield f"ACTION: follow_up\n{FIRST} "
+        assert first_voice_arrived.wait(TIMEOUT_S), "the voice waited for the whole reply"
+        yield SECOND
+
+    fake_llm.script.append(pieces())
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        while (message := socket.receive_json())["type"] != "audio_chunk":
+            assert message["type"] in ("transcript", "interviewer_text")
+        assert message["seq"] == 0
+        first_voice_arrived.set()
+        assert messages_of_one_reply(socket)[-1]["type"] == "turn_complete"
+
+
+def test_one_failed_voice_keeps_the_others_and_their_numbers(
+    client, db, session_id, token, fake_llm, tts, storage
+):
+    speak = tts.synthesize
+
+    def first_fails(text):
+        if text == FIRST:
+            raise TextToSpeechError("crashed on this text")
+        return speak(text)
+
+    tts.synthesize = first_fails
+    fake_llm.script.append(streamed("follow_up", f"{FIRST} {SECOND}"))
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        messages = messages_of_one_reply(socket)
+
+    assert [m["seq"] for m in messages if m["type"] == "interviewer_text"] == [0, 1]
+    assert audio_seqs(messages) == [1]  # seq still matches its text
+    with wave.open(io.BytesIO(storage.files[turns_in(db, session_id)[-1].audio_url][0])) as joined:
+        assert joined.readframes(joined.getnframes()) == SECOND.encode()
+
+
+def test_llm_failure_gives_the_fallback_reply(client, db, session_id, token, fake_llm):
+    fake_llm.script.extend([LLMError("first"), LLMError("second")])
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        messages = messages_of_one_reply(socket)
+
+    assert "Let's move on" in messages[1]["text"]
+    assert turns_in(db, session_id)[-1].text == messages[1]["text"]
+
+
+def test_short_answer_gets_the_fixed_reply_with_a_voice(client, db, session_id, token, fake_llm):
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": "yes"})
+        messages = messages_of_one_reply(socket)
+
+    assert messages[1]["text"] == REPEAT_TEXT
+    assert audio_seqs(messages) == [0]
+    assert len(fake_llm.calls) == 1  # only the opening question reached the LLM
+    assert len(turns_in(db, session_id)) == 3
+
+
+def test_answer_saved_by_another_tab_while_streaming_is_busy(
+    client, db, session_id, token, fake_llm
+):
+    """Both tabs read the same turn number. The second to save is told, and nothing is broken."""
+
+    def pieces():
+        yield "ACTION: follow_up\nHi "
+        session = db.get(InterviewSession, session_id)
+        session.turns.append(Turn(turn_index=1, speaker="candidate", text="From the other tab"))
+        db.commit()
+        yield "there."
+
+    fake_llm.script.append(pieces())
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        while (message := socket.receive_json())["type"] != "error":
+            pass
+
+    assert message["code"] == "busy"

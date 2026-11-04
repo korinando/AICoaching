@@ -151,7 +151,23 @@ def submit_answer(
     started = time.perf_counter()
     reply = interviewer.handle_answer(state, answer)
     llm_ms = elapsed_ms(started)  # includes any retry; about 0 if a rule answered without the LLM
-    # handle_answer adds 2 messages (answer + reply); saving from first_new catches both.
+    save_answer(db, session, state, first_new, audio_key, stt_ms, llm_ms)
+    return reply
+
+
+def save_answer(
+    db: Session,
+    session: InterviewSession,
+    state: InterviewState,
+    first_new: int,
+    audio_key: str | None,
+    stt_ms: int | None,
+    llm_ms: int,
+) -> None:
+    """Save one answer and its reply, once the agent has finished with state."""
+    if session.status != "in_progress":
+        raise InterviewClosedError(f"Session {session.id} is {session.status}")
+    # The agent adds 2 messages (answer + reply); saving from first_new catches both.
     # If two requests for one session race, both get the same turn_index and the unique
     # constraint (session_id, turn_index) from Step 3 rejects the second commit.
     _save(session, state, first_new, audio_key)
@@ -159,4 +175,3 @@ def submit_answer(
     reply_turn.stt_ms = stt_ms
     reply_turn.llm_ms = llm_ms
     db.commit()
-    return reply
