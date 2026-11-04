@@ -1,4 +1,6 @@
-from app.agent.llm_client import LLMClient, LLMError
+from collections.abc import Iterator
+
+from app.agent.llm_client import LLMClient, LLMError, read_action
 from app.agent.prompts import build_opening_message, build_system_prompt, build_user_message
 from app.agent.schemas import Action, AgentDecision, InterviewState, Message
 
@@ -128,6 +130,65 @@ class Interviewer:
         state.history.append(Message(role="candidate", text=answer))
         state.history.append(Message(role="interviewer", text=text))
         return text
+
+    def _start_stream(self, state: InterviewState) -> tuple[Action, Iterator[str]]:
+        """The action and the spoken text. Retries once, then falls back, like _decide."""
+        system = build_system_prompt(state, streaming=True)
+        user = build_user_message(state)
+        try:
+            return read_action(self.llm.stream(system, user))
+        except LLMError as first_error:
+            print(f"[llm] attempt 1 failed: {first_error}")
+            retry_user = (
+                f"{user}\n\nYour previous reply could not be used ({first_error}). "
+                "Reply again in the required format."
+            )
+            try:
+                return read_action(self.llm.stream(system, retry_user))
+            except LLMError as second_error:
+                print(f"[llm] attempt 2 failed: {second_error}, using fallback")
+                fallback = self._fallback_decision(state)
+                return fallback.action, iter([fallback.text])
+
+    def stream_answer(self, state: InterviewState, answer: str) -> Iterator[str]:
+        """Like handle_answer, but yields the reply piece by piece.
+
+        The state only changes after the last piece, so read this to the end before saving.
+        """
+        if state.finished:
+            raise RuntimeError("Interview already finished")
+
+        if state.short_answer_retries < MAX_SHORT_ANSWER_RETRIES:
+            if _is_pasted_question(state, answer):
+                yield self._ask_again(state, answer, OWN_WORDS_TEXT)
+                return
+            if len(answer.split()) < MIN_ANSWER_WORDS:
+                yield self._ask_again(state, answer, REPEAT_TEXT)
+                return
+
+        state.short_answer_retries = 0
+        state.history.append(Message(role="candidate", text=answer))
+
+        action, pieces = self._start_stream(state)
+        # The same rules as handle_answer, before a single word is spoken.
+        decision = self._enforce_rules(
+            state, AgentDecision(action=action, reasoning="streamed", text="")
+        )
+        if decision.action != action:
+            pieces = iter([decision.text])  # the LLM's text was for an action it can't take
+
+        said = []
+        try:
+            for piece in pieces:
+                said.append(piece)
+                yield piece
+        except LLMError as e:
+            # Words already spoken can't be taken back, so a retry would repeat them.
+            # Carry on with what the candidate actually heard.
+            print(f"[llm] stream failed after {len(said)} pieces: {e}")
+
+        self._apply_decision(state, decision.action)
+        state.history.append(Message(role="interviewer", text="".join(said).strip()))
 
 
 def _is_pasted_question(state: InterviewState, answer: str) -> bool:

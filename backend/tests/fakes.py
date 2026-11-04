@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 from app.agent.schemas import Action, AgentDecision
 
 # A normal answer: long enough (3+ words) to pass the short-answer check and reach the LLM.
@@ -19,6 +21,15 @@ class FakeLLMClient:
         if isinstance(result, Exception):
             raise result
         return result
+
+    def stream(self, system: str, user: str) -> Iterator[str]:
+        self.calls.append((system, user))
+        if not self.script:
+            raise AssertionError("FakeLLMClient was called more times than scripted")
+        result = self.script.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        yield from result  # a list of chunks
 
 
 class FakeAudioStorage:

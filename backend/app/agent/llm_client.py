@@ -1,9 +1,11 @@
+from collections.abc import Iterable, Iterator
 from typing import Any, Protocol
 
 from google import genai
+from google.genai import types
 from pydantic import BaseModel
 
-from app.agent.schemas import AgentDecision
+from app.agent.schemas import Action, AgentDecision
 
 
 class LLMError(Exception):
@@ -15,6 +17,9 @@ class LLMClient(Protocol):
 
     def decide(self, system: str, user: str) -> AgentDecision:
         """Return the next decision, or raise LLMError if anything goes wrong."""
+
+    def stream(self, system: str, user: str) -> Iterator[str]:
+        """Yield the reply piece by piece. Raises LLMError if anything goes wrong."""
 
 
 class TokenUsage(BaseModel):
@@ -37,6 +42,16 @@ class TokenUsage(BaseModel):
         self.output_tokens += usage.total_output_tokens or 0
         self.thought_tokens += usage.total_thought_tokens or 0
         self.total_tokens += usage.total_tokens or 0
+
+    def add_stream(self, usage: Any) -> None:
+        """The same totals, from a streamed reply's usage_metadata (different field names)."""
+        self.calls += 1
+        if usage is None:
+            return
+        self.input_tokens += usage.prompt_token_count or 0
+        self.output_tokens += usage.candidates_token_count or 0
+        self.thought_tokens += usage.thoughts_token_count or 0
+        self.total_tokens += usage.total_token_count or 0
 
 
 class GeminiLLMClient:
@@ -69,3 +84,51 @@ class GeminiLLMClient:
             return AgentDecision.model_validate_json(interaction.output_text)
         except Exception as e:
             raise LLMError(f"{type(e).__name__}: {e}") from e
+
+    def stream(self, system: str, user: str) -> Iterator[str]:
+        config = types.GenerateContentConfig(
+            system_instruction=system,
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
+            http_options=types.HttpOptions(timeout=int(self.timeout * 1000)),  # milliseconds
+        )
+        usage = None
+        try:
+            for chunk in self.client.models.generate_content_stream(
+                model=self.model, contents=user, config=config
+            ):
+                usage = chunk.usage_metadata or usage
+                if chunk.text:  # the last chunk can be empty
+                    yield chunk.text
+        except Exception as e:
+            raise LLMError(f"{type(e).__name__}: {e}") from e
+        finally:
+            self.usage.add_stream(usage)
+
+
+def _parse_action(line: str) -> Action:
+    label, _, value = line.partition(":")
+    action = value.strip()
+    if label.strip() != "ACTION" or action not in get_args(Action):
+        raise LLMError(f"Bad action line: {line!r}")
+    return action
+
+
+def _spoken_text(first: str, chunks: Iterator[str]) -> Iterator[str]:
+    yield first
+    yield from chunks  # the pieces read_action hasn't touched
+
+
+def read_action(chunks: Iterable[str]) -> tuple[Action, Iterator[str]]:
+    """Read only until the action and the first spoken words have arrived.
+
+    Returns the action and the spoken text, still streaming. Raises LLMError if the reply
+    doesn't start with a valid action followed by something to say.
+    """
+    chunks = iter(chunks)  # a for loop on an iterator continues where the last one stopped
+    buffer = ""
+    for chunk in chunks:
+        buffer += chunk
+        first_line, newline, rest = buffer.partition("\n")
+        if newline and rest.strip():
+            return _parse_action(first_line), _spoken_text(rest.lstrip(), chunks)
+    raise LLMError(f"No action and spoken text in the reply: {buffer!r}")
