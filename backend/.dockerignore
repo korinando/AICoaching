@@ -1,0 +1,9 @@
+# Keeps secrets out of the image, and the build context small. Settings arrive at runtime.
+.env
+.env.*
+.venv/
+voices/
+tests/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/

@@ -37,6 +37,41 @@ services:
       timeout: 3s
       retries: 10
 
+  # The job queue. 127.0.0.1: reachable from this PC only, because it has no password.
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data # jobs survive a restart
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Runs jobs from the queue, such as scoring an interview.
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: rq worker reports --url redis://redis:6379/0
+    env_file: ./backend/.env
+    environment:
+      # Inside Docker, services reach each other by name and on their own ports. These replace the
+      # .env values, which are for programs running directly on the PC.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://storage:8333
+    volumes:
+      - ./backend/app:/app/app:ro # each job loads the current code, without rebuilding the image
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  redisdata:
   seaweeddata:
