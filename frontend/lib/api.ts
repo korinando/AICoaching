@@ -59,7 +59,8 @@ export type ReportCriterion = {
 };
 
 export type Report = {
-  status: "not_finished" | "none" | "pending" | "ready" | "failed";
+  status:
+    "not_finished" | "none" | "pending" | "ready" | "failed" | "too_short";
   can_request: boolean; // true: the page offers "Create report" or "Try again"
   overall_score: number | null;
   criteria: ReportCriterion[];

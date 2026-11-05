@@ -96,6 +96,7 @@ function Outcome({ session }: { session: SessionSummary }) {
     none: "No report yet",
     pending: "Generating…",
     failed: "Report failed",
+    too_short: "Too short to score",
     ready: "",
   };
   return (

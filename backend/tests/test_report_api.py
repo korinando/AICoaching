@@ -9,6 +9,7 @@ from app.core.security import create_token
 from app.models import FeedbackReport, InterviewSession, User
 from app.scoring.rubric import RUBRIC
 from app.services.reports import JOB_TIMEOUT_S, REPORT_JOB
+from tests.conftest import add_answers
 from tests.fakes import decision
 
 SCORES = {
@@ -33,6 +34,7 @@ def session_id(client, auth_headers, fake_llm, template) -> int:
 
 @pytest.fixture
 def finished(db, session_id) -> int:
+    add_answers(db, session_id)
     db.get(InterviewSession, session_id).status = "completed"
     db.flush()
     return session_id
@@ -221,6 +223,29 @@ def test_asking_before_the_interview_ends_is_409(
 ):
     assert ask_for_report(client, session_id, auth_headers).status_code == 409
     assert reports_of(db, session_id) == []
+    assert report_queue.jobs == []
+
+
+def test_too_short_report_says_so_and_cannot_be_asked_for_again(
+    client, db, auth_headers, finished, report_queue
+):
+    add_report(db, finished, status="too_short")
+
+    assert get_report(client, finished, auth_headers).json()["status"] == "too_short"
+    assert get_report(client, finished, auth_headers).json()["can_request"] is False
+
+    assert ask_for_report(client, finished, auth_headers).json()["status"] == "too_short"
+    assert report_queue.jobs == []
+
+
+def test_asking_on_an_old_short_interview_says_too_short(
+    client, db, auth_headers, session_id, report_queue
+):
+    """Interviews from before reports existed have no row until someone asks."""
+    db.get(InterviewSession, session_id).status = "abandoned"
+    db.flush()
+
+    assert ask_for_report(client, session_id, auth_headers).json()["status"] == "too_short"
     assert report_queue.jobs == []
 
 

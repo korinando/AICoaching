@@ -144,6 +144,8 @@ function Waiting({
       : "Generating your report… This usually takes a minute or two.",
     failed:
       "We couldn't finish your report. Your interview is saved, so you can try again.",
+    too_short:
+      "This interview was too short to score: a report needs at least 3 real answers. Your answers are still saved.",
     ready: "",
   };
 

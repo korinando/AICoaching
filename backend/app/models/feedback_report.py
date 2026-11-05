@@ -7,7 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
 
-REPORT_STATUSES = ("pending", "ready", "failed")
+# too_short: not enough answers to judge, so it never reaches the worker.
+REPORT_STATUSES = ("pending", "ready", "failed", "too_short")
 
 
 class FeedbackReport(Base):

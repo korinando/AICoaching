@@ -15,7 +15,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.agent.interviewer import MIN_ANSWER_WORDS
 from app.models import FeedbackReport, InterviewSession
+from app.scoring.scorer import build_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +26,19 @@ REPORT_JOB = "app.workers.jobs.generate_report"
 # Hearing the recordings again, then Gemini, which has been slow (a 92 s call in Week 4).
 JOB_TIMEOUT_S = 600
 MAX_ERROR_CHARS = 2000
+# A report judges a pattern across the interview, and 1 or 2 answers can't show one. A guess: Week 6
+# may show a better number.
+MIN_ANSWERS_TO_SCORE = 3
 
 # Takes a finished interview, returns the report's fields. Raises if it can't: see fill_report.
 Scorer = Callable[[InterviewSession], dict[str, Any]]
+
+
+def has_enough_to_score(session: InterviewSession) -> bool:
+    """Only answers with real words count, with the same limit as the interviewer's "say more"."""
+    pairs = build_pairs(session.turns)
+    real_answers = [pair for pair in pairs if len(pair.answer.split()) >= MIN_ANSWER_WORDS]
+    return len(real_answers) >= MIN_ANSWERS_TO_SCORE
 
 
 def queue_report(queue: Queue, session_id: int) -> None:
@@ -39,16 +51,19 @@ def queue_report(queue: Queue, session_id: int) -> None:
 
 
 def request_report(db: Session, queue: Queue, session_id: int) -> None:
-    """The interview has ended: make sure its report exists, and queue the work."""
+    """The interview has ended: make sure its report exists, and queue the work if it's worth
+    scoring. Too short: no job, so no Gemini call is spent on it."""
+    enough = has_enough_to_score(db.get(InterviewSession, session_id))
     # ON CONFLICT DO NOTHING: if the row already exists, this quietly changes nothing.
     db.execute(
         insert(FeedbackReport)
-        .values(session_id=session_id, status="pending")
+        .values(session_id=session_id, status="pending" if enough else "too_short")
         .on_conflict_do_nothing(index_elements=["session_id"])
     )
     # Saved before queueing: the worker must never pick up a job and find no row.
     db.commit()
-    queue_report(queue, session_id)
+    if enough:
+        queue_report(queue, session_id)
 
 
 def get_report(db: Session, session_id: int) -> FeedbackReport | None:
@@ -78,7 +93,7 @@ def fill_report(db: Session, session_id: int, scorer: Scorer) -> None:
     """The worker's job. A failed scoring is saved on the report and isn't raised: a failed report
     is a normal result that the page can show and someone can retry."""
     report = db.scalar(select(FeedbackReport).where(FeedbackReport.session_id == session_id))
-    if report is None or report.status == "ready":
+    if report is None or report.status in ("ready", "too_short"):
         return
     session = db.get(InterviewSession, session_id)
     if session.status == "in_progress":

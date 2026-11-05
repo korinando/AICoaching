@@ -41,7 +41,7 @@ def no_waiting(monkeypatch):
 
 @pytest.fixture
 def session(db, user, template) -> InterviewSession:
-    """A finished interview: two questions answered, then the closing line."""
+    """A finished interview: three questions answered, then the closing line."""
     session = InterviewSession(user=user, template=template, agent_state={}, status="completed")
     for index, (speaker, text) in enumerate(
         [
@@ -49,6 +49,8 @@ def session(db, user, template) -> InterviewSession:
             ("candidate", ANSWER),
             ("interviewer", "What is an index?"),
             ("candidate", "It makes reads faster."),
+            ("interviewer", "What is a transaction?"),
+            ("candidate", "All the writes succeed together."),
             ("interviewer", "Thank you."),
         ]
     ):

@@ -14,7 +14,7 @@ from app.api.deps import get_audio_storage, get_interviewer, get_text_to_speech
 from app.core.db import get_db
 from app.core.security import create_token
 from app.main import app
-from app.models import Base, InterviewTemplate, User
+from app.models import Base, InterviewSession, InterviewTemplate, Turn, User
 from app.workers.queue import get_queue
 from tests.audio_samples import make_samples
 from tests.db_utils import scratch_database_url
@@ -134,6 +134,18 @@ def storage() -> FakeAudioStorage:
 def tts() -> FakeTextToSpeech:
     """A fake voice, so API tests never load Piper. test_tts.py covers failures of the real one."""
     return FakeTextToSpeech()
+
+
+def add_answers(db: Session, session_id: int, count: int = 3, words: str = "A real answer") -> None:
+    """Answers already given in an interview, in both the turns and the agent's state."""
+    session = db.get(InterviewSession, session_id)
+    history = list(session.agent_state.get("history", []))
+    for _ in range(count):
+        for speaker, text in (("candidate", words), ("interviewer", "And why is that?")):
+            session.turns.append(Turn(turn_index=len(session.turns), speaker=speaker, text=text))
+            history.append({"role": speaker, "text": text})
+    session.agent_state = {**session.agent_state, "history": history}
+    db.flush()
 
 
 @pytest.fixture

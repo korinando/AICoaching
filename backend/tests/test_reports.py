@@ -17,6 +17,7 @@ from app.core.security import create_token
 from app.main import app
 from app.models import FeedbackReport, InterviewSession
 from app.services.reports import REPORT_JOB, fill_report, request_report
+from tests.conftest import add_answers
 from tests.fakes import ANSWER, FakeSpeechToText, decision, streamed
 
 SCORED = {
@@ -43,12 +44,14 @@ def session_id(client, auth_headers, fake_llm, template) -> int:
 
 @pytest.fixture
 def finished(db, session_id) -> int:
+    add_answers(db, session_id)
     db.get(InterviewSession, session_id).status = "completed"
     db.flush()
     return session_id
 
 
 def on_last_topic(db, session_id) -> None:
+    add_answers(db, session_id)
     session = db.get(InterviewSession, session_id)
     session.agent_state = {**session.agent_state, "current_topic_index": 4}
     db.flush()
@@ -84,6 +87,8 @@ def test_agent_ending_the_interview_asks_for_a_report(
 
 
 def test_user_ending_the_interview_asks_for_a_report(client, db, user, session_id, report_queue):
+    add_answers(db, session_id)
+
     with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
         login(socket, user)
         socket.send_json({"type": "end_session"})
@@ -144,6 +149,7 @@ def test_voice_crash_on_the_last_reply_still_asks_for_a_report(
 
 
 def test_redis_down_does_not_stop_the_interview_ending(client, db, user, session_id, report_queue):
+    add_answers(db, session_id)
     report_queue.error = RedisConnectionError("connection refused")
 
     with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
@@ -256,6 +262,7 @@ def test_very_long_error_is_cut(db, finished, report_queue):
 
 
 def test_interview_still_going_is_not_scored(db, session_id, report_queue):
+    add_answers(db, session_id)
     request_report(db, report_queue, session_id)
     calls = []
 
@@ -269,3 +276,66 @@ def test_job_with_no_report_does_nothing(db, finished):
     fill_report(db, finished, lambda session: pytest.fail("should not score"))
 
     assert reports_of(db, finished) == []
+
+
+# --- Interviews too short to score (Step 7) ---------------------------------------------------
+
+
+@pytest.mark.parametrize("count", [0, 1, 2])
+def test_too_few_answers_is_too_short_with_no_job(db, session_id, report_queue, count):
+    add_answers(db, session_id, count=count)
+    db.get(InterviewSession, session_id).status = "abandoned"
+    db.flush()
+
+    request_report(db, report_queue, session_id)
+
+    [report] = reports_of(db, session_id)
+    assert report.status == "too_short"
+    assert report_queue.jobs == []  # no Gemini call for this
+
+
+def test_exactly_enough_answers_gets_a_report(db, session_id, report_queue):
+    add_answers(db, session_id, count=3)
+
+    request_report(db, report_queue, session_id)
+
+    assert reports_of(db, session_id)[0].status == "pending"
+    assert report_queue.jobs == [(REPORT_JOB, session_id)]
+
+
+def test_very_short_answers_do_not_count(db, session_id, report_queue):
+    """Saying "ok" five times isn't an interview. The limit is the interviewer's own."""
+    add_answers(db, session_id, count=5, words="ok")
+
+    request_report(db, report_queue, session_id)
+
+    assert reports_of(db, session_id)[0].status == "too_short"
+
+
+def test_short_answers_do_not_hide_enough_real_ones(db, session_id, report_queue):
+    add_answers(db, session_id, count=2, words="ok")
+    add_answers(db, session_id, count=3)
+
+    request_report(db, report_queue, session_id)
+
+    assert reports_of(db, session_id)[0].status == "pending"
+
+
+def test_user_ending_right_away_is_too_short(client, db, user, session_id, report_queue):
+    with client.websocket_connect(f"/ws/sessions/{session_id}") as socket:
+        login(socket, user)
+        socket.send_json({"type": "end_session"})
+        assert socket.receive_json()["status"] == "abandoned"
+
+    assert reports_of(db, session_id)[0].status == "too_short"
+    assert report_queue.jobs == []
+
+
+def test_the_job_never_scores_a_too_short_report(db, session_id, report_queue):
+    db.get(InterviewSession, session_id).status = "abandoned"
+    db.flush()
+    request_report(db, report_queue, session_id)
+
+    fill_report(db, session_id, lambda session: pytest.fail("should not score"))
+
+    assert reports_of(db, session_id)[0].status == "too_short"

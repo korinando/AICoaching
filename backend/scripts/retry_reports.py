@@ -44,7 +44,9 @@ def main() -> None:
                 print(f"Session {session_id}: sent")
             return
         waiting = db.scalars(
-            select(FeedbackReport.session_id).where(FeedbackReport.status != "ready")
+            select(FeedbackReport.session_id).where(
+                FeedbackReport.status.in_(("pending", "failed"))
+            )
         ).all()
         for session_id in waiting:
             queue_report(queue, session_id)

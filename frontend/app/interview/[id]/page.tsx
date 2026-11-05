@@ -221,6 +221,17 @@ function Interview() {
     setUploading(true);
   }
 
+  function endInterview() {
+    const message =
+      "End the interview now? You can't continue it afterwards. You'll get a report if you've given at least 3 answers.";
+    if (!window.confirm(message)) return;
+    prepareToAnswer();
+    setError(null);
+    if (!sendToSocket({ type: "end_session" })) {
+      setError("Not connected yet. Please try again in a moment.");
+    }
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     // Enter sends; Shift+Enter makes a new line.
     if (event.key === "Enter" && !event.shiftKey) {
@@ -243,9 +254,18 @@ function Interview() {
         >
           ← Dashboard
         </Link>
-        <span className="text-sm text-zinc-500">
-          {finished ? "Finished" : "In progress"}
-        </span>
+        {finished ? (
+          <span className="text-sm text-zinc-500">Finished</span>
+        ) : (
+          <button
+            type="button"
+            onClick={endInterview}
+            disabled={busy || lost}
+            className="text-sm text-red-600 hover:underline disabled:opacity-50"
+          >
+            End interview
+          </button>
+        )}
       </header>
 
       <ol className="flex-1 space-y-3">

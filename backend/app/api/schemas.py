@@ -76,7 +76,7 @@ class SessionOut(BaseModel):
     turns: list[TurnOut]
 
 
-ReportStatus = Literal["not_finished", "none", "pending", "ready", "failed"]
+ReportStatus = Literal["not_finished", "none", "pending", "ready", "failed", "too_short"]
 
 
 class SessionSummaryOut(BaseModel):
