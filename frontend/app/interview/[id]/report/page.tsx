@@ -141,7 +141,7 @@ function Waiting({
     none: "This interview doesn't have a report yet.",
     pending: report.can_request
       ? "This is taking longer than it should."
-      : "Generating your report… This usually takes a minute or two.",
+      : "Generating your report… This can take a few minutes, because your recordings are listened to again.",
     failed:
       "We couldn't finish your report. Your interview is saved, so you can try again.",
     too_short:

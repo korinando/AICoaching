@@ -63,12 +63,13 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://storage:8333
-      # Models are copied into the volume by hand (docker compose cp): the download fails with a
-      # certificate error inside Docker on this PC, and checking certificates must stay on.
+      # The worker reads the models the PC has downloaded. It never downloads them itself: that
+      # fails with a certificate error inside Docker here, and checking certificates must stay on.
+      WHISPER_MODELS_DIR: /models
       HF_HUB_OFFLINE: "1"
     volumes:
       - ./backend/app:/app/app:ro # each job loads the current code, without rebuilding the image
-      - whispermodels:/root/.cache/huggingface # downloaded once, kept when the worker is recreated
+      - ./backend/whisper_models:/models:ro
     depends_on:
       db:
         condition: service_healthy
@@ -78,5 +79,4 @@ services:
 volumes:
   pgdata:
   redisdata:
-  whispermodels:
   seaweeddata:

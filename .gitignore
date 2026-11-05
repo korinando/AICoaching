@@ -35,3 +35,4 @@ Thumbs.db
 # Piper voice models (60 MB each). From backend/:
 #   uv run python -m piper.download_voices en_US-lessac-medium --data-dir voices
 backend/voices/
+backend/whisper_models/
