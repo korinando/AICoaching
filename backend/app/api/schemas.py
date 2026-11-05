@@ -76,6 +76,20 @@ class SessionOut(BaseModel):
     turns: list[TurnOut]
 
 
+ReportStatus = Literal["not_finished", "none", "pending", "ready", "failed"]
+
+
+class SessionSummaryOut(BaseModel):
+    """One row on the history page."""
+
+    id: int
+    role: str
+    status: str
+    started_at: datetime
+    report_status: ReportStatus
+    overall_score: float | None
+
+
 class ReportCriterionOut(BaseModel):
     name: str
     score: int
@@ -87,7 +101,7 @@ class ReportOut(BaseModel):
     """What the report page shows. Built by hand and not from the row: the raw error and the hidden
     quotes stay on the server."""
 
-    status: Literal["not_finished", "none", "pending", "ready", "failed"]
+    status: ReportStatus
     can_request: bool  # the page offers "Create report" or "Try again"
     overall_score: float | None = None
     criteria: list[ReportCriterionOut] = []

@@ -15,6 +15,7 @@ from app.api.schemas import (
     ReportOut,
     SessionCreate,
     SessionOut,
+    SessionSummaryOut,
 )
 from app.models import FeedbackReport, InterviewSession, InterviewTemplate, Turn, User
 from app.scoring.rubric import RUBRIC
@@ -23,6 +24,9 @@ from app.services.reports import can_request_report, get_report, request_report_
 from app.speech.storage import StorageError
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+# Enough for a person to look through, and a limit on the work one request can cause.
+MAX_HISTORY_ROWS = 100
 
 
 def _get_own_session(db: DB, session_id: int, user: User) -> InterviewSession:
@@ -53,6 +57,44 @@ def create_session(
     session = start_interview(db, user, template, interviewer)
     speak_turns(db, session, session.turns, tts, storage)
     return SessionOut.model_validate(session)
+
+
+@router.get("")
+def list_sessions(db: DB, user: CurrentUser) -> list[SessionSummaryOut]:
+    """My interviews, newest first, for the history page.
+
+    One query with joins, not the session objects and their relationships: loading each session's
+    template and report separately would cost one more query per row, and get slower over time.
+    Outer join on the report: an interview with no report is still listed.
+    """
+    rows = db.execute(
+        select(
+            InterviewSession.id,
+            InterviewTemplate.role,
+            InterviewSession.status,
+            InterviewSession.started_at,
+            FeedbackReport.status.label("report_status"),
+            FeedbackReport.overall_score,
+        )
+        .join(InterviewTemplate, InterviewSession.template_id == InterviewTemplate.id)
+        .outerjoin(FeedbackReport, FeedbackReport.session_id == InterviewSession.id)
+        .where(InterviewSession.user_id == user.id)
+        .order_by(InterviewSession.started_at.desc())
+        .limit(MAX_HISTORY_ROWS)
+    ).all()
+    return [
+        SessionSummaryOut(
+            id=row.id,
+            role=row.role,
+            status=row.status,
+            started_at=row.started_at,
+            report_status=(
+                "not_finished" if row.status == "in_progress" else row.report_status or "none"
+            ),
+            overall_score=row.overall_score,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/{session_id}")

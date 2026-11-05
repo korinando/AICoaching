@@ -1,9 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { createSession, getMe, listTemplates, logout, type Template, type User } from "@/lib/api";
+import {
+  createSession,
+  getMe,
+  listTemplates,
+  logout,
+  type Template,
+  type User,
+} from "@/lib/api";
 import { useRequireLogin } from "@/lib/useRequireLogin";
 
 export default function DashboardPage() {
@@ -36,7 +44,9 @@ export default function DashboardPage() {
       const session = await createSession(templateId); // includes the opening question (LLM call)
       router.push(`/interview/${session.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start the interview");
+      setError(
+        e instanceof Error ? e.message : "Could not start the interview",
+      );
       setStartingId(null);
     }
   }
@@ -46,23 +56,36 @@ export default function DashboardPage() {
   return (
     <main className="mx-auto w-full max-w-3xl space-y-6 p-6">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Hi {user.name}, choose an interview</h1>
-        <button
-          onClick={() => {
-            logout();
-            router.replace("/login");
-          }}
-          className="text-sm text-zinc-500 hover:underline"
-        >
-          Log out
-        </button>
+        <h1 className="text-2xl font-semibold">
+          Hi {user.name}, choose an interview
+        </h1>
+        <div className="flex shrink-0 gap-4">
+          <Link
+            href="/history"
+            className="text-sm text-zinc-500 hover:underline"
+          >
+            Past interviews
+          </Link>
+          <button
+            onClick={() => {
+              logout();
+              router.replace("/login");
+            }}
+            className="text-sm text-zinc-500 hover:underline"
+          >
+            Log out
+          </button>
+        </div>
       </header>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <ul className="grid gap-4 sm:grid-cols-2">
         {templates.map((t) => (
-          <li key={t.id} className="space-y-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+          <li
+            key={t.id}
+            className="space-y-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800"
+          >
             <div>
               <h2 className="font-semibold">{t.role}</h2>
               <p className="text-sm text-zinc-500">
@@ -71,7 +94,10 @@ export default function DashboardPage() {
             </div>
             <ul className="flex flex-wrap gap-1.5">
               {t.topics.map((topic) => (
-                <li key={topic} className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
+                <li
+                  key={topic}
+                  className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800"
+                >
                   {topic}
                 </li>
               ))}

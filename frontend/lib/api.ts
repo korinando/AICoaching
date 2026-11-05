@@ -42,6 +42,15 @@ export type Session = {
   turns: Turn[];
 };
 
+export type SessionSummary = {
+  id: number;
+  role: string;
+  status: SessionStatus;
+  started_at: string;
+  report_status: Report["status"];
+  overall_score: number | null;
+};
+
 export type ReportCriterion = {
   name: string;
   score: number;
@@ -204,6 +213,8 @@ export const createSession = (templateId: number) =>
     method: "POST",
     body: { template_id: templateId },
   });
+
+export const listSessions = () => apiFetch<SessionSummary[]>("/sessions");
 
 export const getSession = (id: number) => apiFetch<Session>(`/sessions/${id}`);
 
