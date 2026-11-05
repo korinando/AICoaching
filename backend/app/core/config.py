@@ -32,8 +32,10 @@ class Settings(BaseSettings):
     # Recordings storage: anything that speaks the S3 API (SeaweedFS here, real S3 later).
     s3_access_key: SecretStr
     s3_secret_key: SecretStr
-    s3_endpoint_url: str = "http://localhost:8333"
+    s3_endpoint_url: str = "http://127.0.0.1:8333"
     s3_bucket: str = "ai-coach-recordings"
+    # The job queue. 127.0.0.1 and not localhost, for the same reason as storage.
+    redis_url: str = "redis://127.0.0.1:6379/0"
     # base.en: English only, about 140 MB. Bigger (small.en) is more accurate but slower.
     whisper_model: str = "base.en"
     # A file in backend/voices/, downloaded with: uv run python -m piper.download_voices

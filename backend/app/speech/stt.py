@@ -26,23 +26,30 @@ class SpeechToTextError(Exception):
 class SpeechToText(Protocol):
     """Anything that turns WAV bytes into text. Tests use a fake with scripted text."""
 
+    def load(self) -> None:
+        """Get ready ahead of the first request. Optional: transcribe does it if needed."""
+
     def transcribe(self, wav: bytes) -> str:
         """The spoken words, or "" if there's no speech. Raises SpeechToTextError on failure."""
 
 
 class WhisperSpeechToText:
-    """The model is loaded once, on the first request (the first run also downloads it)."""
+    """The model is loaded once, at startup or on the first request (the first run also
+    downloads it)."""
 
     def __init__(self, model_name: str) -> None:
         self.model_name = model_name
         self._model: WhisperModel | None = None
 
+    def load(self) -> None:
+        if self._model is None:
+            # int8: smaller numbers inside the model, so faster on a CPU, for a very
+            # small loss of accuracy.
+            self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+
     def transcribe(self, wav: bytes) -> str:
         try:
-            if self._model is None:
-                # int8: smaller numbers inside the model, so faster on a CPU, for a very
-                # small loss of accuracy.
-                self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+            self.load()
             segments, _info = self._model.transcribe(
                 io.BytesIO(wav),
                 language="en",  # don't let an accent make it guess another language

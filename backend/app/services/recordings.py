@@ -1,5 +1,4 @@
-"""From an uploaded recording to the text of the answer. Used by both POST /audio and the
-WebSocket, so a spoken answer follows the same rules however it arrives."""
+"""From an uploaded recording to the text of the answer. Used by the WebSocket."""
 
 import time
 from dataclasses import dataclass

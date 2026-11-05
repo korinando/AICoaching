@@ -7,7 +7,8 @@ from app.core.security import create_token
 from app.models import User
 from app.speech.storage import StorageError
 from app.speech.tts import TextToSpeechError
-from tests.fakes import ANSWER, decision, spoken
+from tests.fakes import ANSWER, decision, spoken, streamed
+from tests.ws_client import answer_on_socket
 
 OPENING = "Welcome! What is REST?"
 REPLY = "Why stateless?"
@@ -20,8 +21,8 @@ def session_id(client, auth_headers, fake_llm, template) -> int:
     return response.json()["id"]
 
 
-def answer(client, session_id, headers, text=ANSWER):
-    return client.post(f"/sessions/{session_id}/answer", json={"text": text}, headers=headers)
+def turns(client, session_id, headers) -> list[dict]:
+    return client.get(f"/sessions/{session_id}", headers=headers).json()["turns"]
 
 
 def get_audio(client, session_id, turn_index, headers):
@@ -41,62 +42,60 @@ def test_opening_question_is_spoken(client, auth_headers, session_id, tts):
     assert response.content == spoken(OPENING)
 
 
-def test_only_the_reply_is_spoken_not_my_answer(client, auth_headers, session_id, fake_llm, tts):
-    fake_llm.script.append(decision("follow_up", text=REPLY))
+def test_only_the_reply_is_spoken_not_my_answer(
+    client, user, auth_headers, session_id, fake_llm, tts
+):
+    fake_llm.script.append(streamed("follow_up", REPLY))
 
-    response = answer(client, session_id, auth_headers)
+    answer_on_socket(client, session_id, user.id, text=ANSWER)
 
     assert tts.calls == [OPENING, REPLY]
-    typed_answer, reply = response.json()["turns"]
-    assert typed_answer["has_audio"] is False
-    assert reply["has_audio"] is True
     assert get_audio(client, session_id, 2, auth_headers).content == spoken(REPLY)
 
 
-def test_fixed_rule_replies_are_spoken_too(client, auth_headers, session_id, tts):
+def test_fixed_rule_replies_are_spoken_too(client, user, session_id, tts):
     """The Week 1 "say a bit more" reply never calls the LLM, but still needs a voice."""
-    answer(client, session_id, auth_headers, text="ok")
+    answer_on_socket(client, session_id, user.id, text="ok")
 
     assert tts.calls[-1] == REPEAT_TEXT
 
 
-def test_transcript_reload_says_which_turns_have_audio(client, auth_headers, session_id, fake_llm):
+def test_transcript_reload_says_which_turns_have_audio(
+    client, user, auth_headers, session_id, fake_llm
+):
     """After F5 the page must know which replies can be replayed."""
-    fake_llm.script.append(decision("follow_up", text=REPLY))
-    answer(client, session_id, auth_headers)
+    fake_llm.script.append(streamed("follow_up", REPLY))
+    answer_on_socket(client, session_id, user.id, text=ANSWER)
 
-    turns = client.get(f"/sessions/{session_id}", headers=auth_headers).json()["turns"]
-
-    assert [t["has_audio"] for t in turns] == [True, False, True]
+    assert [t["has_audio"] for t in turns(client, session_id, auth_headers)] == [True, False, True]
 
 
 # --- If the voice fails, the interview carries on with text --------------------------------------
 
 
-def test_voice_failure_still_returns_the_reply_as_text(
-    client, auth_headers, session_id, fake_llm, tts
+def test_voice_failure_still_gives_the_reply_as_text(
+    client, user, auth_headers, session_id, fake_llm, tts
 ):
     tts.error = TextToSpeechError("voice file missing")
-    fake_llm.script.append(decision("follow_up", text=REPLY))
+    fake_llm.script.append(streamed("follow_up", REPLY))
 
-    response = answer(client, session_id, auth_headers)
+    answer_on_socket(client, session_id, user.id, text=ANSWER)
 
-    assert response.status_code == 200
-    reply = response.json()["turns"][-1]
+    reply = turns(client, session_id, auth_headers)[-1]
     assert reply["text"] == REPLY
     assert reply["has_audio"] is False
 
 
-def test_storage_failure_still_returns_the_reply_as_text(
-    client, auth_headers, session_id, fake_llm, storage
+def test_storage_failure_still_gives_the_reply_as_text(
+    client, user, auth_headers, session_id, fake_llm, storage
 ):
+    fake_llm.script.append(streamed("follow_up", REPLY))
     storage.error = StorageError("connection refused")
-    fake_llm.script.append(decision("follow_up", text=REPLY))
 
-    response = answer(client, session_id, auth_headers)
+    answer_on_socket(client, session_id, user.id, text=ANSWER)
 
-    assert response.status_code == 200
-    assert response.json()["turns"][-1]["has_audio"] is False
+    storage.error = None
+    assert turns(client, session_id, auth_headers)[-1]["has_audio"] is False
 
 
 def test_interview_can_start_when_the_voice_is_down(client, auth_headers, fake_llm, template, tts):
@@ -112,9 +111,9 @@ def test_interview_can_start_when_the_voice_is_down(client, auth_headers, fake_l
 # --- GET .../turns/{turn_index}/audio ------------------------------------------------------------
 
 
-def test_turn_without_audio_is_404(client, auth_headers, session_id, fake_llm):
-    fake_llm.script.append(decision("follow_up", text=REPLY))
-    answer(client, session_id, auth_headers)  # a typed answer has no recording
+def test_turn_without_audio_is_404(client, user, auth_headers, session_id, fake_llm):
+    fake_llm.script.append(streamed("follow_up", REPLY))
+    answer_on_socket(client, session_id, user.id, text=ANSWER)  # a typed answer has no recording
 
     assert get_audio(client, session_id, 1, auth_headers).status_code == 404
 

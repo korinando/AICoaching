@@ -46,12 +46,6 @@ class SessionCreate(BaseModel):
     template_id: int
 
 
-class AnswerRequest(BaseModel):
-    # No min_length: empty and very short answers are the agent's job ("say a bit more").
-    # max_length stops a huge paste from filling the prompt and the database.
-    text: str = Field(max_length=MAX_ANSWER_CHARS)
-
-
 class TurnOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -78,13 +72,6 @@ class SessionOut(BaseModel):
     status: str
     started_at: datetime
     ended_at: datetime | None
-    turns: list[TurnOut]
-
-
-class AnswerOut(BaseModel):
-    """Only the new turns (the answer as saved + the reply), so the chat can append them."""
-
-    status: str
     turns: list[TurnOut]
 
 

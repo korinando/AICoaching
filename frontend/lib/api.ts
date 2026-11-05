@@ -42,8 +42,6 @@ export type Session = {
   turns: Turn[];
 };
 
-export type AnswerResult = { status: SessionStatus; turns: Turn[] };
-
 type TokenPair = { access_token: string; refresh_token: string };
 
 // ---- Token storage -------------------------------------------------------------------------
@@ -193,12 +191,6 @@ export const createSession = (templateId: number) =>
 
 export const getSession = (id: number) => apiFetch<Session>(`/sessions/${id}`);
 
-export const sendAnswer = (id: number, text: string) =>
-  apiFetch<AnswerResult>(`/sessions/${id}/answer`, {
-    method: "POST",
-    body: { text },
-  });
-
 /** The audio of one turn, as a file in memory. Fetched here rather than with <audio src>,
  * because a plain src can't send the login token. */
 export const getTurnAudio = (sessionId: number, turnIndex: number) =>
@@ -217,15 +209,3 @@ export const reportFirstAudio = (
     body: { first_audio_ms: Math.round(firstAudioMs) },
     empty: true,
   });
-
-/** A spoken answer: the server transcribes it and answers like sendAnswer. */
-export function uploadAudio(id: number, blob: Blob) {
-  const form = new FormData();
-  // "audio" must match the backend parameter name. The file name is only a label; the
-  // format travels as the blob's type (e.g. "audio/webm;codecs=opus").
-  form.append("audio", blob, "answer");
-  return apiFetch<AnswerResult>(`/sessions/${id}/audio`, {
-    method: "POST",
-    body: form,
-  });
-}

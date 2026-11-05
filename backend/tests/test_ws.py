@@ -630,3 +630,38 @@ def test_a_refused_recording_does_not_leave_the_session_busy(
 
         socket.send_json({"type": "text_answer", "text": ANSWER})
         assert messages_of_one_reply(socket)[1]["text"] == REPLY
+
+
+def test_other_user_cannot_touch_the_interview(client, db, session_id, fake_llm):
+    other = User(email="other@example.com", password_hash="x", name="Other")
+    db.add(other)
+    db.flush()
+    calls_after_start = len(fake_llm.calls)
+
+    with connect(client, session_id) as socket:
+        login(socket, create_token(other.id, "access"))
+        assert_refused(socket, "not_found", ws_api.CLOSE_NOT_FOUND)
+
+    assert len(fake_llm.calls) == calls_after_start  # refused before the agent ran
+    assert len(turns_in(db, session_id)) == 1
+
+
+def test_a_whole_interview_then_no_more_answers(client, db, session_id, token, fake_llm):
+    fake_llm.script.extend([streamed("next_question")] * 4)  # 5 topics: the last ends it
+
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        for _ in range(4):
+            socket.send_json({"type": "text_answer", "text": ANSWER})
+            messages_of_one_reply(socket)
+        fake_llm.script.append(streamed("next_question"))  # on the last topic: the rules end it
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        reply = messages_of_one_reply(socket)
+        assert CLOSING_TEXT in " ".join(m.get("text", "") for m in reply)
+        assert socket.receive_json() == {"type": "session_ended", "status": "completed"}
+
+    assert db.get(InterviewSession, session_id).status == "completed"
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        assert socket.receive_json()["code"] == "interview_closed"

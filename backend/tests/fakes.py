@@ -59,6 +59,10 @@ class FakeTextToSpeech:
         self.error: Exception | None = None
         self.calls: list[str] = []
 
+    def load(self) -> None:
+        if self.error:
+            raise self.error
+
     def synthesize(self, text: str) -> bytes:
         self.calls.append(text)
         if self.error:
@@ -73,6 +77,10 @@ class FakeSpeechToText:
         self.text = text
         self.error: Exception | None = None
         self.calls: list[bytes] = []
+
+    def load(self) -> None:
+        if self.error:
+            raise self.error
 
     def transcribe(self, wav: bytes) -> str:
         self.calls.append(wav)

@@ -1,8 +1,10 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
+from app import main
 from app.core.db import get_db
-from app.main import app
+from app.main import app, load_speech_models
+from tests.fakes import FakeSpeechToText, FakeTextToSpeech
 
 
 def test_health_returns_ok():
@@ -54,3 +56,35 @@ def test_login_says_the_database_is_down_instead_of_a_500(client):
 
     assert response.status_code == 503
     assert "Database unavailable" in response.json()["detail"]
+
+
+def test_speech_models_are_loaded_at_startup(monkeypatch):
+    loaded = []
+
+    class Voice(FakeTextToSpeech):
+        def load(self):
+            loaded.append("voice")
+
+    class Whisper(FakeSpeechToText):
+        def load(self):
+            loaded.append("whisper")
+
+    monkeypatch.setattr(main, "get_text_to_speech", Voice)
+    monkeypatch.setattr(main, "get_speech_to_text", Whisper)
+
+    load_speech_models()
+
+    assert loaded == ["voice", "whisper"]
+
+
+def test_a_model_that_fails_to_load_does_not_stop_the_server_or_the_other(monkeypatch):
+    voice = FakeTextToSpeech()
+    voice.error = FileNotFoundError("voice file missing")
+    whisper = FakeSpeechToText()
+    whisper.load = lambda: whisper.calls.append(b"loaded")
+    monkeypatch.setattr(main, "get_text_to_speech", lambda: voice)
+    monkeypatch.setattr(main, "get_speech_to_text", lambda: whisper)
+
+    load_speech_models()
+
+    assert whisper.calls == [b"loaded"]

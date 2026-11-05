@@ -16,12 +16,15 @@ class TextToSpeechError(Exception):
 class TextToSpeech(Protocol):
     """Anything that turns text into WAV bytes. Tests use a fake."""
 
+    def load(self) -> None:
+        """Get ready ahead of the first request. Optional: synthesize does it if needed."""
+
     def synthesize(self, text: str) -> bytes:
         """The spoken text as a WAV file, or raises TextToSpeechError."""
 
 
 class PiperTextToSpeech:
-    """The voice is loaded once, on the first request (it takes a few seconds)."""
+    """The voice is loaded once, at startup or on the first request (it takes a few seconds)."""
 
     def __init__(self, voice_path: Path) -> None:
         self.voice_path = voice_path
@@ -29,16 +32,19 @@ class PiperTextToSpeech:
         # Sentences are spoken at the same time. Without this, each would load its own voice.
         self._load_lock = threading.Lock()
 
+    def load(self) -> None:
+        with self._load_lock:
+            if self._voice is None:
+                if not self.voice_path.exists():
+                    raise FileNotFoundError(
+                        f"{self.voice_path} is missing. From backend/ run: uv run python -m "
+                        f"piper.download_voices {self.voice_path.stem} --data-dir voices"
+                    )
+                self._voice = PiperVoice.load(self.voice_path)
+
     def synthesize(self, text: str) -> bytes:
         try:
-            with self._load_lock:
-                if self._voice is None:
-                    if not self.voice_path.exists():
-                        raise FileNotFoundError(
-                            f"{self.voice_path} is missing. From backend/ run: uv run python -m "
-                            f"piper.download_voices {self.voice_path.stem} --data-dir voices"
-                        )
-                    self._voice = PiperVoice.load(self.voice_path)
+            self.load()
             buffer = io.BytesIO()
             with wave.open(buffer, "wb") as wav_file:
                 self._voice.synthesize_wav(text, wav_file)

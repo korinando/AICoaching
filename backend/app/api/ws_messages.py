@@ -29,7 +29,7 @@ class Auth(ClientMessageBase):
 
 
 class TextAnswer(ClientMessageBase):
-    """A typed answer, so the chat box keeps working when POST /answer goes away."""
+    """A typed answer from the chat box."""
 
     type: Literal["text_answer"]
     text: str = Field(max_length=MAX_ANSWER_CHARS)

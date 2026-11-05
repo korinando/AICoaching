@@ -11,7 +11,8 @@ from app.main import app
 from app.models import Turn, User
 from app.speech.tts import TextToSpeechError
 from scripts.latency_report import RULE_REPLIES, percentile, summary_line
-from tests.fakes import ANSWER, FakeSpeechToText, decision
+from tests.fakes import ANSWER, FakeSpeechToText, decision, streamed
+from tests.ws_client import answer_on_socket
 
 
 @pytest.fixture
@@ -29,14 +30,6 @@ def turn(db, session_id, turn_index) -> Turn:
     )
 
 
-def speak(client, session_id, headers, audio_samples):
-    return client.post(
-        f"/sessions/{session_id}/audio",
-        files={"audio": ("answer", audio_samples["webm"], "audio/webm;codecs=opus")},
-        headers=headers,
-    )
-
-
 def report(client, session_id, turn_index, headers, ms=1234):
     return client.post(
         f"/sessions/{session_id}/turns/{turn_index}/first-audio",
@@ -45,37 +38,36 @@ def report(client, session_id, turn_index, headers, ms=1234):
     )
 
 
-def test_spoken_reply_has_every_stage(
-    client, db, auth_headers, session_id, fake_llm, audio_samples
-):
-    fake_llm.script.append(decision("follow_up"))
+def test_spoken_reply_has_every_stage(client, db, user, session_id, fake_llm, audio_samples):
+    fake_llm.script.append(streamed("follow_up"))
 
-    speak(client, session_id, auth_headers, audio_samples)
+    answer_on_socket(client, session_id, user.id, recording=audio_samples["webm"])
 
     reply = turn(db, session_id, 2)
     assert reply.stt_ms is not None
     assert reply.llm_ms is not None
     assert reply.tts_ms is not None
     assert reply.total_latency_ms is not None
-    # The server total contains the stages, so it can't be smaller than their sum.
-    assert reply.total_latency_ms >= reply.stt_ms + reply.llm_ms + reply.tts_ms
+    # Whisper and Gemini run one after the other. Piper isn't added: its sentences run at the same
+    # time as each other and as Gemini, so its sum can be longer than the real wait.
+    assert reply.total_latency_ms >= reply.stt_ms + reply.llm_ms
 
 
 def test_timings_are_on_the_reply_not_on_my_answer(
-    client, db, auth_headers, session_id, fake_llm, audio_samples
+    client, db, user, session_id, fake_llm, audio_samples
 ):
-    fake_llm.script.append(decision("follow_up"))
+    fake_llm.script.append(streamed("follow_up"))
 
-    speak(client, session_id, auth_headers, audio_samples)
+    answer_on_socket(client, session_id, user.id, recording=audio_samples["webm"])
 
     answer = turn(db, session_id, 1)
     assert answer.stt_ms is None and answer.llm_ms is None and answer.total_latency_ms is None
 
 
-def test_typed_answer_has_no_speech_to_text_time(client, db, auth_headers, session_id, fake_llm):
-    fake_llm.script.append(decision("follow_up"))
+def test_typed_answer_has_no_speech_to_text_time(client, db, user, session_id, fake_llm):
+    fake_llm.script.append(streamed("follow_up"))
 
-    client.post(f"/sessions/{session_id}/answer", json={"text": ANSWER}, headers=auth_headers)
+    answer_on_socket(client, session_id, user.id, text=ANSWER)
 
     reply = turn(db, session_id, 2)
     assert reply.stt_ms is None
@@ -83,12 +75,12 @@ def test_typed_answer_has_no_speech_to_text_time(client, db, auth_headers, sessi
 
 
 def test_voice_failure_leaves_tts_empty_but_keeps_the_total(
-    client, db, auth_headers, session_id, fake_llm, tts, audio_samples
+    client, db, user, session_id, fake_llm, tts, audio_samples
 ):
     tts.error = TextToSpeechError("voice file missing")
-    fake_llm.script.append(decision("follow_up"))
+    fake_llm.script.append(streamed("follow_up"))
 
-    speak(client, session_id, auth_headers, audio_samples)
+    answer_on_socket(client, session_id, user.id, recording=audio_samples["webm"])
 
     reply = turn(db, session_id, 2)
     assert reply.tts_ms is None
@@ -105,8 +97,8 @@ def test_browser_report_is_saved_on_the_reply(client, db, auth_headers, session_
     assert turn(db, session_id, 0).first_audio_ms == 2500
 
 
-def test_report_on_my_own_answer_is_404(client, auth_headers, session_id):
-    client.post(f"/sessions/{session_id}/answer", json={"text": "ok"}, headers=auth_headers)
+def test_report_on_my_own_answer_is_404(client, user, auth_headers, session_id):
+    answer_on_socket(client, session_id, user.id, text="ok")
 
     assert report(client, session_id, 1, auth_headers).status_code == 404
 
