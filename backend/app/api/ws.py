@@ -25,13 +25,21 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import iterate_in_threadpool, run_in_threadpool
 from pydantic import ValidationError
+from rq import Queue
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.websockets import WebSocketState
 
 from app.agent.interviewer import Interviewer
 from app.agent.schemas import InterviewState
-from app.api.deps import DB, AudioStorageDep, InterviewerDep, SpeechToTextDep, TextToSpeechDep
+from app.api.deps import (
+    DB,
+    AudioStorageDep,
+    InterviewerDep,
+    ReportQueueDep,
+    SpeechToTextDep,
+    TextToSpeechDep,
+)
 from app.api.ws_messages import (
     AnswerInProgress,
     AudioChunk,
@@ -57,6 +65,7 @@ from app.services.interviews import (
     save_answer,
 )
 from app.services.recordings import ProcessedRecording, RecordingError, process_recording
+from app.services.reports import request_report
 from app.speech.audio import join_wavs
 from app.speech.sentences import split_sentences
 from app.speech.storage import AudioStorage, StorageError, new_audio_key
@@ -128,6 +137,7 @@ class Interview:
     storage: AudioStorage
     speech_to_text: SpeechToText
     tts: TextToSpeech
+    report_queue: Queue
 
     def _session(self) -> InterviewSession:
         # Read again each time: another tab may have changed it since the last step.
@@ -222,6 +232,10 @@ class Interview:
             abandon_interview(self.db, self._session())
         except InterviewClosedError:
             raise Rejected("interview_closed", CLOSED_MESSAGE) from None
+        self.request_report()
+
+    def request_report(self) -> None:
+        request_report(self.db, self.report_queue, self.session_id)
 
 
 async def send(websocket: WebSocket, message: ServerMessage) -> None:
@@ -357,6 +371,9 @@ async def _work_on_answer(
         voices.put_nowait(None)
         # Saved before waiting for the voices: if one crashes, the answer isn't lost.
         status = await run_in_threadpool(interview.save_reply, reply, audio_key, stt_ms, llm_ms)
+        if status != "in_progress":
+            # Here and not at the end: a crash while waiting for the voices mustn't lose the report.
+            await run_in_threadpool(interview.request_report)
         spoken = await sender
     finally:
         sender.cancel()  # does nothing if it finished; otherwise it must not outlive the reply
@@ -398,9 +415,10 @@ async def interview_socket(
     storage: AudioStorageDep,
     speech_to_text: SpeechToTextDep,
     tts: TextToSpeechDep,
+    report_queue: ReportQueueDep,
 ) -> None:
     """Answers are handled one at a time, in the order they arrive."""
-    interview = Interview(session_id, db, interviewer, storage, speech_to_text, tts)
+    interview = Interview(session_id, db, interviewer, storage, speech_to_text, tts, report_queue)
     await websocket.accept()  # first, or we couldn't receive the token or explain a refusal
     if not await authenticate(websocket, interview):
         return

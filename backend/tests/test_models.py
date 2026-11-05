@@ -11,6 +11,7 @@ def test_all_tables_are_registered():
     assert set(Base.metadata.tables) == {
         "users",
         "interview_templates",
+        "feedback_reports",
         "interview_sessions",
         "turns",
     }

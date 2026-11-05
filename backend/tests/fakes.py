@@ -52,6 +52,19 @@ class FakeAudioStorage:
         return self.files[key][0]
 
 
+class FakeQueue:
+    """An RQ queue for tests: remembers the jobs instead of sending them to Redis, or fails."""
+
+    def __init__(self) -> None:
+        self.jobs: list[tuple] = []
+        self.error: Exception | None = None
+
+    def enqueue(self, job: str, *args, **_options) -> None:
+        if self.error:
+            raise self.error
+        self.jobs.append((job, *args))
+
+
 class FakeTextToSpeech:
     """TextToSpeech for tests: "speaks" by returning the text as bytes, or fails on demand."""
 

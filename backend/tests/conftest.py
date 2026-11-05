@@ -15,9 +15,10 @@ from app.core.db import get_db
 from app.core.security import create_token
 from app.main import app
 from app.models import Base, InterviewTemplate, User
+from app.workers.queue import get_queue
 from tests.audio_samples import make_samples
 from tests.db_utils import scratch_database_url
-from tests.fakes import FakeAudioStorage, FakeLLMClient, FakeTextToSpeech
+from tests.fakes import FakeAudioStorage, FakeLLMClient, FakeQueue, FakeTextToSpeech
 
 TEST_DB_NAME = "ai_coach_test"
 
@@ -136,10 +137,19 @@ def tts() -> FakeTextToSpeech:
 
 
 @pytest.fixture
-def client(db: Session, storage: FakeAudioStorage, tts: FakeTextToSpeech) -> Iterator[TestClient]:
-    """The app, with the test database and fake storage and voice in every endpoint."""
+def report_queue() -> FakeQueue:
+    """So no test needs Redis. test_queue.py and scripts/check_queue.py cover the real one."""
+    return FakeQueue()
+
+
+@pytest.fixture
+def client(
+    db: Session, storage: FakeAudioStorage, tts: FakeTextToSpeech, report_queue: FakeQueue
+) -> Iterator[TestClient]:
+    """The app, with the test database and fake storage, voice and queue in every endpoint."""
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_audio_storage] = lambda: storage
     app.dependency_overrides[get_text_to_speech] = lambda: tts
+    app.dependency_overrides[get_queue] = lambda: report_queue
     yield TestClient(app)
     app.dependency_overrides.clear()

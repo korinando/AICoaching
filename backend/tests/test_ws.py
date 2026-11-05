@@ -540,11 +540,13 @@ class LeavingSocket:
     ids=["before_transcript", "after_transcript", "after_text", "after_audio"],
 )
 def test_reply_is_finished_and_saved_after_the_candidate_leaves(
-    db, session_id, fake_llm, tts, storage, speech, messages_before_leaving
+    db, session_id, fake_llm, tts, storage, speech, report_queue, messages_before_leaving
 ):
     fake_llm.script.append(streamed("follow_up", f"{FIRST} {SECOND}"))
     socket = LeavingSocket(messages_before_leaving)
-    interview = ws_api.Interview(session_id, db, Interviewer(fake_llm), storage, speech, tts)
+    interview = ws_api.Interview(
+        session_id, db, Interviewer(fake_llm), storage, speech, tts, report_queue
+    )
 
     ended = asyncio.run(ws_api.answer(socket, interview, text=ANSWER))
 
@@ -559,10 +561,12 @@ def test_reply_is_finished_and_saved_after_the_candidate_leaves(
 
 
 def test_spoken_answer_is_saved_after_the_candidate_leaves(
-    db, session_id, fake_llm, tts, storage, speech, audio_samples
+    db, session_id, fake_llm, tts, storage, speech, report_queue, audio_samples
 ):
     fake_llm.script.append(streamed("follow_up", REPLY))
-    interview = ws_api.Interview(session_id, db, Interviewer(fake_llm), storage, speech, tts)
+    interview = ws_api.Interview(
+        session_id, db, Interviewer(fake_llm), storage, speech, tts, report_queue
+    )
 
     asyncio.run(ws_api.answer(LeavingSocket(0), interview, recording=audio_samples["webm"]))
 

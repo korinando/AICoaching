@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from rq import Queue
 from sqlalchemy.orm import Session
 
 from app.agent.interviewer import Interviewer
@@ -17,6 +18,7 @@ from app.models import User
 from app.speech.storage import AudioStorage, S3AudioStorage
 from app.speech.stt import SpeechToText, WhisperSpeechToText
 from app.speech.tts import PiperTextToSpeech, TextToSpeech
+from app.workers.queue import get_queue
 
 VOICES_DIR = Path(__file__).resolve().parents[2] / "voices"  # backend/voices
 
@@ -67,6 +69,7 @@ def get_interviewer() -> Interviewer:
 
 
 InterviewerDep = Annotated[Interviewer, Depends(get_interviewer)]
+ReportQueueDep = Annotated[Queue, Depends(get_queue)]
 
 
 @lru_cache
