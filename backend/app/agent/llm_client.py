@@ -1,11 +1,13 @@
 from collections.abc import Iterable, Iterator
-from typing import Any, Protocol, get_args
+from typing import Any, Protocol, TypeVar, get_args
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
 from app.agent.schemas import Action, AgentDecision
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LLMError(Exception):
@@ -20,6 +22,9 @@ class LLMClient(Protocol):
 
     def stream(self, system: str, user: str) -> Iterator[str]:
         """Yield the reply piece by piece. Raises LLMError if anything goes wrong."""
+
+    def complete_json(self, system: str, user: str, schema: type[T]) -> T:
+        """Return the reply as this schema, or raise LLMError if anything goes wrong."""
 
 
 class TokenUsage(BaseModel):
@@ -82,6 +87,26 @@ class GeminiLLMClient:
             if not interaction.output_text:
                 raise LLMError("Empty response from model")
             return AgentDecision.model_validate_json(interaction.output_text)
+        except Exception as e:
+            raise LLMError(f"{type(e).__name__}: {e}") from e
+
+    def complete_json(self, system: str, user: str, schema: type[T]) -> T:
+        config = types.GenerateContentConfig(
+            system_instruction=system,
+            thinking_config=types.ThinkingConfig(thinking_level="low"),
+            response_mime_type="application/json",
+            response_json_schema=schema.model_json_schema(),
+            http_options=types.HttpOptions(timeout=int(self.timeout * 1000)),  # milliseconds
+        )
+        try:
+            response = self.client.models.generate_content(
+                model=self.model, contents=user, config=config
+            )
+            # Count before checking the reply: the tokens are spent even if it's unusable.
+            self.usage.add_stream(response.usage_metadata)
+            if not response.text:
+                raise LLMError("Empty response from model")
+            return schema.model_validate_json(response.text)
         except Exception as e:
             raise LLMError(f"{type(e).__name__}: {e}") from e
 

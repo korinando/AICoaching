@@ -17,7 +17,6 @@ from app.core.security import create_token
 from app.main import app
 from app.models import FeedbackReport, InterviewSession
 from app.services.reports import REPORT_JOB, fill_report, request_report
-from app.workers import jobs
 from tests.fakes import ANSWER, FakeSpeechToText, decision, streamed
 
 SCORED = {
@@ -272,8 +271,3 @@ def test_job_with_no_report_does_nothing(db, finished):
     fill_report(db, finished, lambda session: pytest.fail("should not score"))
 
     assert reports_of(db, finished) == []
-
-
-def test_scoring_placeholder_fails_clearly_until_step_3(session_id, db):
-    with pytest.raises(NotImplementedError, match="Step 3"):
-        jobs.score_interview(db.get(InterviewSession, session_id))

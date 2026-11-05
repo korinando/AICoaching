@@ -1,13 +1,25 @@
 """Functions the worker runs. The queue stores only this function's name and its arguments, so the
 arguments must be small, simple values, like a session id and not a database object."""
 
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.agent.llm_client import GeminiLLMClient
+from app.core.config import get_settings
 from app.core.db import get_engine
 from app.models import InterviewSession
+from app.scoring.scorer import score_session
 from app.services.reports import fill_report
+
+
+@lru_cache
+def _llm() -> GeminiLLMClient:
+    settings = get_settings()
+    return GeminiLLMClient(
+        model=settings.llm_model, api_key=settings.gemini_api_key.get_secret_value()
+    )
 
 
 def ping(message: str) -> str:
@@ -16,8 +28,7 @@ def ping(message: str) -> str:
 
 
 def score_interview(session: InterviewSession) -> dict[str, Any]:
-    """A placeholder until the scoring module exists (app/scoring/, Week 5 Step 3)."""
-    raise NotImplementedError("Scoring isn't written yet (Week 5 Step 3)")
+    return score_session(session, _llm())
 
 
 def generate_report(session_id: int) -> None:
