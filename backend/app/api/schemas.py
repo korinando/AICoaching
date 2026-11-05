@@ -2,6 +2,7 @@
 the API never leaks a column by accident (e.g. password_hash)."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -73,6 +74,25 @@ class SessionOut(BaseModel):
     started_at: datetime
     ended_at: datetime | None
     turns: list[TurnOut]
+
+
+class ReportCriterionOut(BaseModel):
+    name: str
+    score: int
+    explanation: str
+    examples: list[str]
+
+
+class ReportOut(BaseModel):
+    """What the report page shows. Built by hand and not from the row: the raw error and the hidden
+    quotes stay on the server."""
+
+    status: Literal["not_finished", "none", "pending", "ready", "failed"]
+    can_request: bool  # the page offers "Create report" or "Try again"
+    overall_score: float | None = None
+    criteria: list[ReportCriterionOut] = []
+    strengths: list[str] = []
+    improvements: list[str] = []
 
 
 class UserOut(BaseModel):

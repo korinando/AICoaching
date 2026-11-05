@@ -6,11 +6,12 @@ has to mean the same as "running it once": still one report, and no second scori
 
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from redis.exceptions import RedisError
 from rq import Queue
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -48,6 +49,29 @@ def request_report(db: Session, queue: Queue, session_id: int) -> None:
     # Saved before queueing: the worker must never pick up a job and find no row.
     db.commit()
     queue_report(queue, session_id)
+
+
+def get_report(db: Session, session_id: int) -> FeedbackReport | None:
+    return db.scalar(select(FeedbackReport).where(FeedbackReport.session_id == session_id))
+
+
+def can_request_report(report: FeedbackReport | None) -> bool:
+    """None: never asked for. Failed: can be tried again. Pending past the job's time limit: its
+    worker must have died, because the job would have ended by now."""
+    if report is None or report.status == "failed":
+        return True
+    if report.status == "pending":
+        return datetime.now(UTC) - report.created_at > timedelta(seconds=JOB_TIMEOUT_S)
+    return False
+
+
+def request_report_again(db: Session, queue: Queue, session_id: int) -> None:
+    """Does nothing while one is being made or if it's ready, so a double click can't start a second
+    job. A new row and not an update: its created_at starts the wait for a stuck job again."""
+    if not can_request_report(get_report(db, session_id)):
+        return
+    db.execute(delete(FeedbackReport).where(FeedbackReport.session_id == session_id))
+    request_report(db, queue, session_id)
 
 
 def fill_report(db: Session, session_id: int, scorer: Scorer) -> None:

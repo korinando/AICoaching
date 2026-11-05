@@ -1,10 +1,25 @@
 from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
 
-from app.api.deps import DB, AudioStorageDep, CurrentUser, InterviewerDep, TextToSpeechDep
-from app.api.schemas import FirstAudioReport, SessionCreate, SessionOut
-from app.models import InterviewSession, InterviewTemplate, Turn, User
+from app.api.deps import (
+    DB,
+    AudioStorageDep,
+    CurrentUser,
+    InterviewerDep,
+    ReportQueueDep,
+    TextToSpeechDep,
+)
+from app.api.schemas import (
+    FirstAudioReport,
+    ReportCriterionOut,
+    ReportOut,
+    SessionCreate,
+    SessionOut,
+)
+from app.models import FeedbackReport, InterviewSession, InterviewTemplate, Turn, User
+from app.scoring.rubric import RUBRIC
 from app.services.interviews import speak_turns, start_interview
+from app.services.reports import can_request_report, get_report, request_report_again
 from app.speech.storage import StorageError
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -79,3 +94,46 @@ def report_first_audio(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such reply")
     turn.first_audio_ms = body.first_audio_ms
     db.commit()
+
+
+def _report_out(session: InterviewSession, report: FeedbackReport | None) -> ReportOut:
+    if session.status == "in_progress":
+        return ReportOut(status="not_finished", can_request=False)
+    if report is None:
+        return ReportOut(status="none", can_request=True)
+    if report.status != "ready":
+        return ReportOut(status=report.status, can_request=can_request_report(report))
+    return ReportOut(
+        status="ready",
+        can_request=False,
+        overall_score=report.overall_score,
+        # The rubric's order: JSONB returns keys in its own.
+        criteria=[
+            ReportCriterionOut(
+                name=name,
+                score=report.scores[name]["score"],
+                explanation=report.scores[name]["explanation"],
+                examples=[example["comment"] for example in report.scores[name]["examples"]],
+            )
+            for name in RUBRIC
+        ],
+        strengths=report.strengths,
+        improvements=report.improvements,
+    )
+
+
+@router.get("/{session_id}/report")
+def read_report(session_id: int, db: DB, user: CurrentUser) -> ReportOut:
+    """The report page asks this every few seconds until the report has left "pending"."""
+    session = _get_own_session(db, session_id, user)
+    return _report_out(session, get_report(db, session.id))
+
+
+@router.post("/{session_id}/report", status_code=status.HTTP_202_ACCEPTED)
+def ask_for_report(session_id: int, db: DB, user: CurrentUser, queue: ReportQueueDep) -> ReportOut:
+    """Create a report, or try again after a failure. 202: accepted, but the work comes later."""
+    session = _get_own_session(db, session_id, user)
+    if session.status == "in_progress":
+        raise HTTPException(status.HTTP_409_CONFLICT, "The interview hasn't ended yet")
+    request_report_again(db, queue, session.id)
+    return _report_out(session, get_report(db, session.id))

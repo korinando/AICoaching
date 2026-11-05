@@ -293,8 +293,12 @@ function Interview() {
       {finished ? (
         <p className="mt-4 rounded-lg bg-zinc-100 p-4 text-center text-sm dark:bg-zinc-800">
           The interview is over.{" "}
+          <Link href={`/interview/${sessionId}/report`} className="underline">
+            See your report
+          </Link>{" "}
+          or{" "}
           <Link href="/dashboard" className="underline">
-            Start another one
+            start another one
           </Link>
         </p>
       ) : (

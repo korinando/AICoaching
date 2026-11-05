@@ -42,6 +42,22 @@ export type Session = {
   turns: Turn[];
 };
 
+export type ReportCriterion = {
+  name: string;
+  score: number;
+  explanation: string;
+  examples: string[];
+};
+
+export type Report = {
+  status: "not_finished" | "none" | "pending" | "ready" | "failed";
+  can_request: boolean; // true: the page offers "Create report" or "Try again"
+  overall_score: number | null;
+  criteria: ReportCriterion[];
+  strengths: string[];
+  improvements: string[];
+};
+
 type TokenPair = { access_token: string; refresh_token: string };
 
 // ---- Token storage -------------------------------------------------------------------------
@@ -190,6 +206,12 @@ export const createSession = (templateId: number) =>
   });
 
 export const getSession = (id: number) => apiFetch<Session>(`/sessions/${id}`);
+
+export const getReport = (id: number) =>
+  apiFetch<Report>(`/sessions/${id}/report`);
+
+export const requestReport = (id: number) =>
+  apiFetch<Report>(`/sessions/${id}/report`, { method: "POST" });
 
 /** The audio of one turn, as a file in memory. Fetched here rather than with <audio src>,
  * because a plain src can't send the login token. */
