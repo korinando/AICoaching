@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/.env, found from this file's location, so it works whatever folder you start in.
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+WHISPER_MODELS_DIR = Path(__file__).resolve().parents[2] / "whisper_models"
 
 
 class Settings(BaseSettings):
@@ -38,8 +39,12 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     # base.en: English only, about 140 MB. Bigger (small.en) is more accurate but slower.
     whisper_model: str = "base.en"
-    # Only for reports: the worker hears the recordings again, when nobody is waiting.
-    scoring_whisper_model: str = "small.en"
+    # Only for reports: the worker hears the recordings again, when nobody is waiting. turbo made
+    # the most sense of my real recordings, and is about 3x slower than small.en.
+    scoring_whisper_model: str = "turbo"
+    # Next to the project and not in the shared Hugging Face folder on C:. A model that isn't here
+    # is downloaded here. The worker in Docker reads this same folder.
+    whisper_models_dir: Path = WHISPER_MODELS_DIR
     # A file in backend/voices/, downloaded with: uv run python -m piper.download_voices
     piper_voice: str = "en_US-lessac-medium"
 

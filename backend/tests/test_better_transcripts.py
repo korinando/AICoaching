@@ -11,7 +11,7 @@ from app.workers import jobs
 from app.workers.transcripts import with_better_transcripts
 from tests.fakes import FakeLLMClient, FakeSpeechToText
 
-BETTER = "what small.en heard"
+BETTER = "what the bigger model heard"
 SAVED = "what base.en heard"
 RECORDING_KEY = "sessions/1/answer.wav"
 
@@ -120,6 +120,6 @@ def test_the_job_scores_the_better_text_with_the_right_template(session, storage
 
 
 def test_the_job_has_time_for_a_long_interview_and_a_slow_gemini():
-    """20 answers at the 10 s the slowest one took, plus the first model download (about 150 s),
-    plus Gemini's worst case (220 s). The worker would kill a job that passes this limit."""
-    assert 20 * 10 + 150 + 220 < JOB_TIMEOUT_S
+    """20 answers at a slow 30 s each, plus Gemini's worst case (220 s). The worker would kill a job
+    that passes this limit. The model isn't downloaded here: it's copied in by hand."""
+    assert 20 * 30 + 220 < JOB_TIMEOUT_S

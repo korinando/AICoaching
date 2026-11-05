@@ -5,6 +5,8 @@ from typing import Protocol
 
 from faster_whisper import WhisperModel
 
+from app.core.config import get_settings
+
 # Nudges Whisper toward these spellings. Without it, technical words are easily misheard
 # ("post grass Q L"). Words from the interview topics, not a sentence to transcribe.
 VOCABULARY_HINT = (
@@ -45,7 +47,12 @@ class WhisperSpeechToText:
         if self._model is None:
             # int8: smaller numbers inside the model, so faster on a CPU, for a very
             # small loss of accuracy.
-            self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+            self._model = WhisperModel(
+                self.model_name,
+                device="cpu",
+                compute_type="int8",
+                download_root=str(get_settings().whisper_models_dir),
+            )
 
     def transcribe(self, wav: bytes) -> str:
         try:

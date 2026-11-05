@@ -3,6 +3,7 @@
 .env.*
 .venv/
 voices/
+whisper_models/
 tests/
 **/__pycache__/
 .pytest_cache/

@@ -1,8 +1,11 @@
 """Better transcripts for scoring: the worker hears the recordings again with a bigger model.
 
 During the interview, speed matters, so base.en listens. In a background job nobody is waiting, so
-small.en can take its time, and the report judges closer to what was really said. The saved turns
-don't change: this is a copy, used only for scoring.
+a bigger model can take its time, and the report judges closer to what was really said. The saved
+turns don't change: this is a copy, used only for scoring.
+
+The question isn't given to Whisper as a hint. It fixed some terms, but it also put the question's
+words in the candidate's mouth, which would give credit for things they never said.
 """
 
 import logging

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # A name and not the function itself: the API only needs to name the job, and the worker imports it.
 REPORT_JOB = "app.workers.jobs.generate_report"
 # Hearing the recordings again, then Gemini, which has been slow (a 92 s call in Week 4).
-JOB_TIMEOUT_S = 600
+JOB_TIMEOUT_S = 900
 MAX_ERROR_CHARS = 2000
 # A report judges a pattern across the interview, and 1 or 2 answers can't show one. A guess: Week 6
 # may show a better number.
