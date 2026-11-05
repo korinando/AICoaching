@@ -24,7 +24,6 @@ SCORED = {
     "scores": {"clarity": 4},
     "strengths": ["Clear"],
     "improvements": ["More depth"],
-    "per_question": [{"question": "What is REST?", "note": "Good"}],
 }
 
 
@@ -188,7 +187,6 @@ def test_job_fills_in_the_report(db, finished, report_queue):
     assert report.scores == SCORED["scores"]
     assert report.strengths == SCORED["strengths"]
     assert report.improvements == SCORED["improvements"]
-    assert report.per_question == SCORED["per_question"]
     assert report.error is None
 
 

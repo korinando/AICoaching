@@ -1,5 +1,6 @@
-"""Scores a finished interview: Gemini judges each answer, code checks and adds up (Week 5)."""
+"""Scores a finished interview: Gemini judges the whole of it, code checks and adds up (Week 5)."""
 
+import re
 import time
 from dataclasses import dataclass
 from statistics import mean
@@ -37,19 +38,32 @@ def build_pairs(turns: list) -> list[QuestionAnswer]:
     return pairs
 
 
-def _check_numbers(reply: JudgeReply, pairs: list[QuestionAnswer]) -> None:
-    """The schema can't see this: every answer scored exactly once, and none invented."""
-    returned = sorted(q.number for q in reply.per_question)
-    expected = [pair.number for pair in pairs]
-    if returned != expected:
-        raise LLMError(f"Expected questions {expected}, got {returned}")
+def _normalized(text: str) -> str:
+    """Only words: a different comma or capital letter isn't a made-up quote."""
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _check_examples(reply: JudgeReply, pairs: list[QuestionAnswer]) -> None:
+    """The schema can't see this: every example must really be in the answer it points to. This is
+    how an invented moment ("the blank final response") gets caught."""
+    answers = {pair.number: _normalized(pair.answer) for pair in pairs}
+    for name, verdict in reply.overall:
+        for example in verdict.examples:
+            answer = answers.get(example.question_number)
+            if answer is None:
+                raise LLMError(f"{name}: there is no answer {example.question_number}")
+            quote = _normalized(example.quote)
+            if not quote or quote not in answer:
+                raise LLMError(
+                    f"{name}: {example.quote!r} isn't in answer {example.question_number}"
+                )
 
 
 def _ask_with_retries(llm: LLMClient, system: str, user: str, pairs: list) -> JudgeReply:
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             reply = llm.complete_json(system, user, JudgeReply)
-            _check_numbers(reply, pairs)
+            _check_examples(reply, pairs)
             return reply
         except LLMError:
             if attempt == MAX_ATTEMPTS:
@@ -65,21 +79,27 @@ def score_session(session: InterviewSession, llm: LLMClient) -> dict[str, Any]:
     system = build_scoring_system(session.template.role, session.template.level)
     reply = _ask_with_retries(llm, system, build_scoring_prompt(pairs), pairs)
 
-    # Code does the adding up, so the numbers always agree with each other.
-    all_scores = [q.scores.model_dump() for q in reply.per_question]
-    scores = {name: round(mean(s[name] for s in all_scores), 2) for name in all_scores[0]}
-    questions = {pair.number: pair for pair in pairs}
+    questions = {pair.number: pair.question for pair in pairs}
+    verdicts = reply.overall.model_dump()
+    scores = {
+        name: {
+            "score": verdict["score"],
+            "explanation": verdict["explanation"],
+            "examples": [
+                {
+                    "question": questions[example["question_number"]],
+                    "quote": example["quote"],
+                    "comment": example["comment"],
+                }
+                for example in verdict["examples"]
+            ],
+        }
+        for name, verdict in verdicts.items()
+    }
     return {
-        "overall_score": round(mean(scores.values()), 2),
+        # Code does the adding up, so the number always agrees with the 4 verdicts.
+        "overall_score": round(mean(v["score"] for v in verdicts.values()), 2),
         "scores": scores,
         "strengths": reply.strengths,
         "improvements": reply.improvements,
-        "per_question": [
-            {
-                "question": questions[q.number].question,
-                "answer": questions[q.number].answer,
-                **q.model_dump(),
-            }
-            for q in reply.per_question
-        ],
     }

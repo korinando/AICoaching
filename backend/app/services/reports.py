@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 # A name and not the function itself: the API only needs to name the job, and the worker imports it.
 REPORT_JOB = "app.workers.jobs.generate_report"
-# Scoring waits on Gemini, which has been slow (a 92 s call in Week 4).
-JOB_TIMEOUT_S = 300
+# Hearing the recordings again, then Gemini, which has been slow (a 92 s call in Week 4).
+JOB_TIMEOUT_S = 600
 MAX_ERROR_CHARS = 2000
 
 # Takes a finished interview, returns the report's fields. Raises if it can't: see fill_report.
@@ -66,7 +66,6 @@ def fill_report(db: Session, session_id: int, scorer: Scorer) -> None:
         report.scores = result["scores"]
         report.strengths = result["strengths"]
         report.improvements = result["improvements"]
-        report.per_question = result["per_question"]
         report.status = "ready"
         report.error = None
         db.commit()

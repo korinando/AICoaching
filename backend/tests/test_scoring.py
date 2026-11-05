@@ -13,7 +13,7 @@ from app.models import FeedbackReport, InterviewSession, Turn
 from app.scoring import scorer
 from app.scoring.prompts import build_scoring_prompt, build_scoring_system
 from app.scoring.rubric import RUBRIC
-from app.scoring.schemas import CriterionScores, JudgeReply
+from app.scoring.schemas import JudgeReply, OverallVerdict
 from app.scoring.scorer import QuestionAnswer, build_pairs, score_session
 from app.services.reports import fill_report, request_report
 from app.workers import jobs
@@ -24,17 +24,14 @@ def turn(speaker: str, text: str) -> SimpleNamespace:
     return SimpleNamespace(speaker=speaker, text=text)
 
 
-def judged(*numbers: int, score: int = 3) -> JudgeReply:
-    feedback = [
-        {
-            "number": number,
-            "scores": dict.fromkeys(RUBRIC, score),
-            "justification": "You said something.",
-            "better_answer_outline": "Say more.",
-        }
-        for number in numbers
-    ]
-    return JudgeReply(per_question=feedback, strengths=["Clear"], improvements=["Depth"])
+def judged(score: int = 3, number: int = 1, quote: str = "add an index") -> JudgeReply:
+    """A reply about the `session` fixture. By default, its example is really in answer 1."""
+    example = {"question_number": number, "quote": quote, "comment": "That helped."}
+    overall = {
+        name: {"examples": [example], "explanation": f"Why {name}.", "score": score}
+        for name in RUBRIC
+    }
+    return JudgeReply(overall=overall, strengths=["Clear"], improvements=["Depth"])
 
 
 @pytest.fixture(autouse=True)
@@ -99,51 +96,53 @@ def test_no_answers_gives_no_pairs():
 # --- The whole report --------------------------------------------------------------------------
 
 
-def test_code_calculates_the_averages_and_the_overall_score(session):
-    reply = judged(1, 2)
-    reply.per_question[0].scores = CriterionScores(
-        technical_accuracy=5, clarity=4, structure=3, depth=2
-    )
-    reply.per_question[1].scores = CriterionScores(
-        technical_accuracy=3, clarity=4, structure=1, depth=2
-    )
+def test_overall_score_is_calculated_from_the_judges_4_verdicts(session):
+    reply = judged()
+    reply.overall.technical_accuracy.score = 5
+    reply.overall.clarity.score = 4
+    reply.overall.structure.score = 2
+    reply.overall.depth.score = 2
 
     result = score_session(session, FakeLLMClient([reply]))
 
-    assert result["scores"] == {"technical_accuracy": 4, "clarity": 4, "structure": 2, "depth": 2}
-    assert result["overall_score"] == 3
+    assert result["overall_score"] == 3.25
+    assert result["scores"]["technical_accuracy"]["score"] == 5
+    assert result["scores"]["depth"]["score"] == 2
 
 
-def test_averages_are_rounded(session):
-    reply = judged(1, 2)
-    reply.per_question[0].scores.clarity = 4
-    reply.per_question[1].scores.clarity = 5
+def test_overall_score_keeps_two_decimals_at_most(session, monkeypatch):
+    monkeypatch.setattr(scorer, "mean", lambda values: 10 / 3)
 
-    result = score_session(session, FakeLLMClient([reply]))
-
-    assert result["scores"]["clarity"] == 4.5
-    assert result["overall_score"] == 3.38  # (3 + 4.5 + 3 + 3) / 4 = 3.375
+    assert score_session(session, FakeLLMClient([judged()]))["overall_score"] == 3.33
 
 
-def test_criterion_averages_are_rounded_too(session):
-    """3, 3 and 4 average 3.333...: a report shouldn't show all of that."""
-    session.turns.append(Turn(turn_index=5, speaker="candidate", text="One more answer."))
-    reply = judged(1, 2, 3)
-    reply.per_question[2].scores.clarity = 4
+def test_every_criterion_has_its_explanation_and_examples(session):
+    result = score_session(session, FakeLLMClient([judged()]))
 
-    result = score_session(session, FakeLLMClient([reply]))
+    assert set(result["scores"]) == set(RUBRIC)
+    for name, verdict in result["scores"].items():
+        assert verdict["explanation"] == f"Why {name}."
+        assert verdict["examples"] == [
+            {"question": "What is REST?", "quote": "add an index", "comment": "That helped."}
+        ]
 
-    assert result["scores"]["clarity"] == 3.33
+
+def test_each_example_shows_the_question_it_came_from(session):
+    """The reader needs to see which part of the conversation it means."""
+    result = score_session(session, FakeLLMClient([judged(number=2, quote="reads faster")]))
+
+    assert result["scores"]["clarity"]["examples"][0]["question"] == "What is an index?"
 
 
-def test_each_note_is_saved_with_its_own_question_and_answer(session):
-    result = score_session(session, FakeLLMClient([judged(2, 1)]))  # returned out of order
+def test_prompt_asks_for_a_person_talking_not_a_form():
+    system = build_scoring_system("Role", "junior")
 
-    by_number = {q["number"]: q for q in result["per_question"]}
-    assert by_number[1]["question"] == "What is REST?"
-    assert by_number[1]["answer"] == ANSWER
-    assert by_number[2]["question"] == "What is an index?"
-    assert by_number[2]["answer"] == "It makes reads faster."
+    assert "sitting across from them" in system
+    assert "the candidate won't see them" in system
+
+
+def test_there_are_no_per_answer_scores(session):
+    assert "per_question" not in score_session(session, FakeLLMClient([judged()]))
 
 
 def test_interview_with_no_answers_fails_without_calling_the_llm(session):
@@ -161,20 +160,55 @@ def test_interview_with_no_answers_fails_without_calling_the_llm(session):
 
 @pytest.mark.parametrize(
     "bad_reply",
-    [judged(1), judged(1, 2, 3), judged(1, 1), judged(2, 3)],
-    ids=["skipped", "invented", "repeated", "wrong_numbers"],
+    [
+        judged(quote="the blank final response"),
+        judged(number=2, quote="add an index"),
+        judged(number=99),
+        judged(quote="..."),
+    ],
+    ids=["invented_quote", "quote_from_another_answer", "no_such_answer", "no_words"],
 )
-def test_wrong_questions_are_retried(session, bad_reply):
-    llm = FakeLLMClient([bad_reply, judged(1, 2)])
+def test_examples_that_are_not_real_are_retried(session, bad_reply):
+    llm = FakeLLMClient([bad_reply, judged()])
 
-    result = score_session(session, llm)
+    score_session(session, llm)
 
     assert len(llm.calls) == 2
-    assert len(result["per_question"]) == 2
+
+
+def test_one_bad_example_on_the_last_criterion_is_enough_to_retry(session):
+    bad = judged()
+    bad.overall.depth.examples[0].quote = "something never said"
+    llm = FakeLLMClient([bad, judged()])
+
+    score_session(session, llm)
+
+    assert len(llm.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "quote",
+    ["Add an index", "add   an index", "would add, an index", "index to the table."],
+)
+def test_small_differences_in_a_quote_are_accepted(session, quote):
+    """A different capital or comma isn't a made-up quote, and shouldn't cost a retry."""
+    llm = FakeLLMClient([judged(quote=quote)])
+
+    score_session(session, llm)
+
+    assert len(llm.calls) == 1
+
+
+def test_a_changed_word_in_a_quote_is_refused(session):
+    llm = FakeLLMClient([judged(quote="add a primary key"), judged()])
+
+    score_session(session, llm)
+
+    assert len(llm.calls) == 2
 
 
 def test_llm_failure_is_retried(session):
-    llm = FakeLLMClient([LLMError("503 high demand"), judged(1, 2)])
+    llm = FakeLLMClient([LLMError("503 high demand"), judged()])
 
     score_session(session, llm)
 
@@ -207,16 +241,47 @@ def test_worst_case_fits_in_the_jobs_time_limit():
 @pytest.mark.parametrize("score", [0, 6, -1])
 def test_schema_refuses_scores_outside_1_to_5(criterion, score):
     """One criterion at a time: a limit missing on only one must still fail here."""
-    scores = {**dict.fromkeys(RUBRIC, 3), criterion: score}
+    reply = judged().model_dump()
+    reply["overall"][criterion]["score"] = score
 
     with pytest.raises(ValueError):
-        CriterionScores(**scores)
+        JudgeReply.model_validate(reply)
+
+
+@pytest.mark.parametrize("criterion", list(RUBRIC))
+def test_schema_needs_a_verdict_on_every_criterion(criterion):
+    reply = judged().model_dump()
+    del reply["overall"][criterion]
+
+    with pytest.raises(ValueError):
+        JudgeReply.model_validate(reply)
+
+
+@pytest.mark.parametrize("count", [0, 3])
+def test_schema_needs_1_or_2_examples(count):
+    reply = judged().model_dump()
+    example = reply["overall"]["clarity"]["examples"][0]
+    reply["overall"]["clarity"]["examples"] = [example] * count
+
+    with pytest.raises(ValueError):
+        JudgeReply.model_validate(reply)
+
+
+def test_schema_accepts_2_examples():
+    reply = judged().model_dump()
+    example = reply["overall"]["clarity"]["examples"][0]
+    reply["overall"]["clarity"]["examples"] = [example, example]
+
+    JudgeReply.model_validate(reply)
 
 
 @pytest.mark.parametrize("strengths", [[], ["a", "b", "c", "d"]])
 def test_schema_needs_1_to_3_strengths(strengths):
+    reply = judged().model_dump()
+    reply["strengths"] = strengths
+
     with pytest.raises(ValueError):
-        JudgeReply(per_question=[], strengths=strengths, improvements=["x"])
+        JudgeReply.model_validate(reply)
 
 
 # --- GeminiLLMClient.complete_json: the SDK replaced by a stand-in -----------------------------
@@ -234,16 +299,16 @@ def client_replying(text=None, error=None):
 
 
 def test_complete_json_returns_the_schema():
-    client = client_replying(judged(1).model_dump_json())
+    client = client_replying(judged().model_dump_json())
 
-    assert client.complete_json("system", "user", JudgeReply).per_question[0].number == 1
+    assert client.complete_json("system", "user", JudgeReply).overall.depth.score == 3
     assert client.usage.calls == 1
 
 
 @pytest.mark.parametrize(
     "client",
     [
-        client_replying(judged(1).model_dump_json().replace('"depth":3', '"depth":6')),
+        client_replying(judged().model_dump_json().replace('"score":3', '"score":6')),
         client_replying("not json"),
         client_replying(""),
         client_replying(error=ConnectionError("503")),
@@ -261,7 +326,7 @@ def test_complete_json_turns_every_failure_into_llm_error(client):
 
 def test_rubric_has_exactly_the_schemas_criteria():
     """A criterion in only one of them would be scored but not explained, or explained for nothing."""
-    assert set(RUBRIC) == set(CriterionScores.model_fields)
+    assert set(RUBRIC) == set(OverallVerdict.model_fields)
 
 
 @pytest.mark.parametrize("criterion", list(RUBRIC))
@@ -279,12 +344,11 @@ def test_system_prompt_has_the_role_the_level_and_the_whole_rubric():
             assert meaning in system
 
 
-def test_prompt_lists_every_question_to_score():
+def test_prompt_holds_the_numbered_interview_as_json():
     pairs = [QuestionAnswer(1, "Q1", "A1"), QuestionAnswer(2, "Q2", "A2")]
 
     prompt = build_scoring_prompt(pairs)
 
-    assert "exactly once: 1, 2." in prompt
     assert json.loads(prompt.split("\n\n", 1)[1]) == [
         {"number": 1, "question": "Q1", "answer": "A1"},
         {"number": 2, "question": "Q2", "answer": "A2"},
@@ -312,12 +376,12 @@ def test_interview_is_not_in_the_system_prompt():
 def test_job_saves_the_scorers_report(db, session, report_queue):
     request_report(db, report_queue, session.id)
 
-    fill_report(db, session.id, lambda s: score_session(s, FakeLLMClient([judged(1, 2)])))
+    fill_report(db, session.id, lambda s: score_session(s, FakeLLMClient([judged()])))
 
     report = db.scalar(select(FeedbackReport).where(FeedbackReport.session_id == session.id))
     assert report.status == "ready"
     assert report.overall_score == 3
-    assert len(report.per_question) == 2
+    assert report.scores["clarity"]["examples"][0]["quote"] == "add an index"
 
 
 def test_job_saves_the_error_when_gemini_stays_down(db, session, report_queue):
@@ -332,6 +396,7 @@ def test_job_saves_the_error_when_gemini_stays_down(db, session, report_queue):
 
 
 def test_jobs_score_interview_uses_the_real_scorer(session, monkeypatch):
-    monkeypatch.setattr(jobs, "_llm", lambda: FakeLLMClient([judged(1, 2)]))
+    monkeypatch.setattr(jobs, "_llm", lambda: FakeLLMClient([judged()]))
+    monkeypatch.setattr(jobs, "get_audio_storage", lambda: None)  # nothing here was spoken
 
     assert jobs.score_interview(session)["overall_score"] == 3

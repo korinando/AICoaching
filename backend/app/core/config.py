@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     # base.en: English only, about 140 MB. Bigger (small.en) is more accurate but slower.
     whisper_model: str = "base.en"
+    # Only for reports: the worker hears the recordings again, when nobody is waiting.
+    scoring_whisper_model: str = "small.en"
     # A file in backend/voices/, downloaded with: uv run python -m piper.download_voices
     piper_voice: str = "en_US-lessac-medium"
 

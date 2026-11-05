@@ -29,11 +29,14 @@ def main() -> None:
         if report.status != "ready":
             return
         print(f"Overall: {report.overall_score}")
-        print(f"Scores: {report.scores}")
+        for name, verdict in report.scores.items():
+            print(f"\n{name}: {verdict['score']}")
+            print(f"  {verdict['explanation']}")
+            for example in verdict["examples"]:
+                print(f"  - {example['comment']}")
+        print()
         print("Strengths:", *(f"\n  - {s}" for s in report.strengths))
         print("Improvements:", *(f"\n  - {s}" for s in report.improvements))
-        for question in report.per_question:
-            print(f"\n{question}")
 
 
 if __name__ == "__main__":

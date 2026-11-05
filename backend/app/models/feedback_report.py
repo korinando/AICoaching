@@ -26,6 +26,7 @@ class FeedbackReport(Base):
     scores: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     strengths: Mapped[list[str] | None] = mapped_column(JSONB)
     improvements: Mapped[list[str] | None] = mapped_column(JSONB)
+    # Unused since reports became one verdict per criterion. A migration can remove it.
     per_question: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     # Why the last try failed, so it can be looked at and tried again.
     error: Mapped[str | None] = mapped_column(Text)
