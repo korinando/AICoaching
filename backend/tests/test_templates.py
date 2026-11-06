@@ -21,6 +21,21 @@ def test_new_state_copies_template_settings():
     assert state.history == []
 
 
+def test_data_analyst_template_is_technical():
+    state = new_state("junior_data_analyst")
+    assert state.role == "Junior Data Analyst"
+    assert state.interview_type == "technical"
+    assert "SQL" in state.planned_topics
+
+
+def test_behavioral_template_is_behavioral():
+    """A behavioural (HR) interview. The interviewer's prompt shows interview_type, so it must say
+    "behavioral", and every topic should get its own main question."""
+    state = new_state("junior_behavioral")
+    assert state.interview_type == "behavioral"
+    assert len(state.planned_topics) == state.max_main_questions
+
+
 def test_unknown_template_raises_with_valid_ids():
     """The error must say what IS valid, not just what isn't."""
     with pytest.raises(ValueError, match="junior_frontend"):

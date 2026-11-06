@@ -19,5 +19,19 @@
     "interview_type": "technical",
     "topics": ["Machine learning basics", "LLMs and prompting", "RAG and embeddings", "Evaluating AI systems", "Teamwork"],
     "max_main_questions": 5
+  },
+    "junior_data_analyst": {
+    "role": "Junior Data Analyst",
+    "level": "junior",
+    "interview_type": "technical",
+    "topics": ["SQL", "Data cleaning", "Statistics basics", "Data visualization", "Communicating findings"],
+    "max_main_questions": 5
+  },
+  "junior_behavioral": {
+    "role": "Junior Developer",
+    "level": "junior",
+    "interview_type": "behavioral",
+    "topics": ["Tell me about yourself", "Teamwork and conflict", "A mistake you made", "Working under pressure", "Why this role"],
+    "max_main_questions": 5
   }
 }
