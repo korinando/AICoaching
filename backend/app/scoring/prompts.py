@@ -5,6 +5,43 @@ import json
 
 from app.scoring.rubric import RUBRIC
 
+# The version reports use. Others are tried with scripts/evaluate.py before one replaces it.
+PROMPT_VERSION = "v1"
+
+_SEPARATE_CRITERIA = """Judge each criterion on its own. One impression must not set all four \
+scores: an answer can be correct but badly organised, or clear but shallow.
+- technical_accuracy: only whether what they say is correct. Saying it at length, badly or briefly \
+doesn't change that, and a wrong claim lowers it however well it's said.
+- clarity: how easy it is to follow. Wandering and repetition lower clarity, not accuracy.
+- structure: the order of the answer. A short answer can still be in a sensible order.
+- depth: the reasons, examples and trade-offs they give. A false detail isn't depth. At this level, \
+one real reason or example already reaches 3, and a short definition alone stays at 2 or below."""
+
+_EXAMPLE_ANSWERS = """Example answers to a different question, "What is caching?", with the \
+scores they'd get (technical_accuracy, clarity, structure, depth):
+- "Caching is when you save stuff so it's faster." 3, 4, 2, 2: correct but vague, easy to \
+follow, a single statement, no reason or example.
+- "Caching keeps a copy of data that's slow to get, like a database result, in fast memory, so \
+the next request doesn't redo the work. The hard part is that cached data can go stale, so I'd \
+set an expiry time." 5, 5, 4, 4: correct with a trade-off, clear, point then explanation then \
+example, a concrete example and a real reason.
+- "So caching, I mean, there's the CPU cache, and browsers, and Redis, everybody uses Redis, and \
+it's basically memory, and it's always faster, so you should cache everything." 2, 2, 1, 2: \
+"always faster" and "cache everything" are wrong, it wanders, it has no order, and it names \
+things without explaining them."""
+
+# What each version adds to v1, so a change in the results can be traced to one change here.
+PROMPT_ADDITIONS: dict[str, list[str]] = {
+    "v1": [],
+    "v2": [_SEPARATE_CRITERIA],
+    "v3": [_SEPARATE_CRITERIA, _EXAMPLE_ANSWERS],
+}
+PROMPT_CHANGES = {
+    "v1": "The prompt from Week 5",
+    "v2": "v1 + judge each criterion on its own, with what counts for each",
+    "v3": "v2 + 3 example answers to another question, with their scores",
+}
+
 
 def _format_rubric() -> str:
     sections = []
@@ -14,8 +51,18 @@ def _format_rubric() -> str:
     return "\n\n".join(sections)
 
 
-def build_scoring_system(role: str, level: str) -> str:
+def build_scoring_system(role: str, level: str, version: str = PROMPT_VERSION) -> str:
     """The rules. The interview itself goes in build_scoring_prompt, kept apart from these."""
+    if version not in PROMPT_ADDITIONS:
+        raise ValueError(f"Unknown prompt version {version!r}: {list(PROMPT_ADDITIONS)}")
+    rules = _v1_rules(role, level)
+    additions = "".join(f"{addition}\n\n" for addition in PROMPT_ADDITIONS[version])
+    # Before the part on transcription, so the scoring rules stay together.
+    marker = "The answers were spoken and transcribed automatically"
+    return rules.replace(marker, additions + marker, 1)
+
+
+def _v1_rules(role: str, level: str) -> str:
     return f"""You are a fair, experienced interviewer scoring a practice interview for the role: \
 {role} ({level}). The candidate will read your feedback to improve.
 

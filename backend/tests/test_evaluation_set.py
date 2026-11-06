@@ -10,6 +10,7 @@ from scripts.label_answers import (
     ANSWERS_FILE,
     CRITERIA,
     EVALUATION_DIR,
+    SETS,
     StopLabeling,
     ask_score,
     load_answers,
@@ -157,3 +158,45 @@ def test_the_tool_never_shows_the_type_of_answer(monkeypatch, tmp_path, capsys):
     assert "Done: all 20" in out
     for kind in set(kinds().values()) - {"strong", "average", "weak"}:
         assert kind not in out
+
+
+# --- The confirmation set ----------------------------------------------------------------------
+
+
+def holdout() -> list[dict]:
+    return load_answers(SETS["holdout"]["answers"])
+
+
+def test_the_confirmation_set_is_separate_from_the_tuning_set():
+    """New answers: a version that only fits the first 20 shouldn't pass here."""
+    main_ids = {a["id"] for a in load_answers()}
+    main_questions = {a["question"] for a in load_answers()}
+
+    for answer in holdout():
+        assert answer["id"] not in main_ids
+        assert answer["question"] not in main_questions
+
+
+def test_the_confirmation_set_has_its_own_hidden_types():
+    data = json.loads(SETS["holdout"]["kinds"].read_text(encoding="utf-8"))
+    data.pop("_warning")
+
+    assert set(data) == {str(a["id"]) for a in holdout()}
+    for answer in holdout():
+        assert set(answer) == {"id", "role", "level", "question", "answer"}
+
+
+def test_the_confirmation_set_has_its_own_scores_file():
+    assert SETS["holdout"]["scores"] != SETS["main"]["scores"]
+
+
+def test_labeling_the_confirmation_set_never_touches_the_main_scores(monkeypatch, tmp_path):
+    main_before = SETS["main"]["scores"].read_bytes()
+    path = tmp_path / "holdout.csv"
+    replies(monkeypatch, "4", "4", "4", "4", "q")
+    monkeypatch.setattr("sys.argv", ["label_answers", "--set", "holdout", "--scores", str(path)])
+
+    label_answers.main()
+
+    assert set(load_scores(path)) == {holdout()[0]["id"]}
+    assert SETS["main"]["scores"].read_bytes() == main_before

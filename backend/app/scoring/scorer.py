@@ -9,7 +9,7 @@ from typing import Any
 from app.agent.interviewer import OWN_WORDS_TEXT, REPEAT_TEXT
 from app.agent.llm_client import LLMClient, LLMError
 from app.models import InterviewSession
-from app.scoring.prompts import build_scoring_prompt, build_scoring_system
+from app.scoring.prompts import PROMPT_VERSION, build_scoring_prompt, build_scoring_system
 from app.scoring.schemas import JudgeReply
 
 # Fixed replies from a rule, not real questions: an answer to one still answers the question before.
@@ -72,11 +72,13 @@ def _ask_with_retries(llm: LLMClient, system: str, user: str, pairs: list) -> Ju
     raise AssertionError("unreachable")
 
 
-def score_session(session: InterviewSession, llm: LLMClient) -> dict[str, Any]:
+def score_session(
+    session: InterviewSession, llm: LLMClient, prompt_version: str = PROMPT_VERSION
+) -> dict[str, Any]:
     pairs = build_pairs(session.turns)
     if not pairs:
         raise ValueError("No answers to score")
-    system = build_scoring_system(session.template.role, session.template.level)
+    system = build_scoring_system(session.template.role, session.template.level, prompt_version)
     reply = _ask_with_retries(llm, system, build_scoring_prompt(pairs), pairs)
 
     questions = {pair.number: pair.question for pair in pairs}

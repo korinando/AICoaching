@@ -4,7 +4,8 @@ Your scores are saved after every answer, so you can stop with q and carry on la
 running the AI on these answers: seeing its scores first would bias yours.
 
 Run from backend/:
-    uv run python -m scripts.label_answers
+    uv run python -m scripts.label_answers                  # the 20 test answers
+    uv run python -m scripts.label_answers --set holdout    # the confirmation set
 """
 
 import argparse
@@ -18,6 +19,20 @@ from app.scoring.rubric import RUBRIC
 EVALUATION_DIR = Path(__file__).resolve().parents[2] / "evaluation"
 ANSWERS_FILE = EVALUATION_DIR / "answers.jsonl"
 SCORES_FILE = EVALUATION_DIR / "my_scores.csv"
+# main: the 20 answers the prompt versions were tuned on. holdout: new answers to confirm a winner
+# on, because a version can fit the answers it was tuned on without really being better.
+SETS = {
+    "main": {
+        "answers": ANSWERS_FILE,
+        "scores": SCORES_FILE,
+        "kinds": EVALUATION_DIR / "answer_kinds.json",
+    },
+    "holdout": {
+        "answers": EVALUATION_DIR / "holdout_answers.jsonl",
+        "scores": EVALUATION_DIR / "holdout_scores.csv",
+        "kinds": EVALUATION_DIR / "holdout_kinds.json",
+    },
+}
 CRITERIA = list(RUBRIC)
 VALID_SCORES = {"1", "2", "3", "4", "5"}
 
@@ -73,11 +88,13 @@ def ask_score(criterion: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score the test answers yourself.")
-    parser.add_argument("--scores", type=Path, default=SCORES_FILE, help="where to save")
+    parser.add_argument("--set", choices=SETS, default="main", help="which answers to score")
+    parser.add_argument("--scores", type=Path, help="where to save (default: the set's file)")
     args = parser.parse_args()
 
-    answers = load_answers()
-    scores = load_scores(args.scores)
+    answers = load_answers(SETS[args.set]["answers"])
+    path = args.scores or SETS[args.set]["scores"]
+    scores = load_scores(path)
     print(f"{format_rubric()}\n")
     print("Judge what each answer shows. The answers were typed or spoken, so ignore odd words.")
     try:
@@ -88,11 +105,11 @@ def main() -> None:
             print(textwrap.fill(f"Question: {answer['question']}", 90))
             print(textwrap.fill(f"Answer: {answer['answer']}", 90))
             scores[answer["id"]] = {name: ask_score(name) for name in CRITERIA}
-            save_scores(args.scores, scores)
+            save_scores(path, scores)
     except (StopLabeling, EOFError):
         print(f"\nStopped. Saved {len(scores)} of {len(answers)}. Run this again to carry on.")
         return
-    print(f"\nDone: all {len(answers)} saved in {args.scores}")
+    print(f"\nDone: all {len(answers)} saved in {path}")
 
 
 if __name__ == "__main__":

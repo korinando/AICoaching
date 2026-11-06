@@ -14,16 +14,18 @@ from pathlib import Path
 from statistics import mean
 
 from scripts.evaluate import RESULTS_DIR, compare, load_results, run_path, score_pairs
-from scripts.label_answers import CRITERIA, SCORES_FILE, load_scores
+from scripts.label_answers import CRITERIA, SETS, load_scores
 
 MIN_RUNS = 2
 
 
-def find_runs(label: str, folder: Path = RESULTS_DIR) -> list[dict[int, dict]]:
+def find_runs(
+    label: str, folder: Path = RESULTS_DIR, answer_set: str = "main"
+) -> list[dict[int, dict]]:
     """Every saved run of this version, in order. Stops at the first run that doesn't exist."""
     runs = []
     number = 1
-    while (path := run_path(label, number, folder)).exists():
+    while (path := run_path(label, number, folder, answer_set)).exists():
         runs.append(load_results(path))
         number += 1
     return runs
@@ -77,9 +79,10 @@ def line(name: str, stats: dict[str, float]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="How much the AI judge varies between runs.")
     parser.add_argument("--label", required=True)
+    parser.add_argument("--set", choices=SETS, default="main")
     args = parser.parse_args()
 
-    runs = find_runs(args.label)
+    runs = find_runs(args.label, answer_set=args.set)
     if len(runs) < MIN_RUNS:
         raise SystemExit(
             f"Only {len(runs)} run of {args.label}. Make more with: "
@@ -96,7 +99,7 @@ def main() -> None:
     )
 
     print("\n=== Agreement with me, run by run (how much the headline number itself moves)")
-    mine = load_scores(SCORES_FILE)
+    mine = load_scores(SETS[args.set]["scores"])
     for number, run in enumerate(runs, start=1):
         stats = compare(score_pairs(mine, run, ids=ids))
         print(

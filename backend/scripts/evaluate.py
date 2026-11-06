@@ -17,18 +17,20 @@ from statistics import mean
 from types import SimpleNamespace
 
 from app.agent.llm_client import LLMClient, LLMError
+from app.scoring.prompts import PROMPT_ADDITIONS
 from app.scoring.rubric import RUBRIC, RUBRIC_VERSION
 from app.scoring.scorer import score_session
-from scripts.label_answers import CRITERIA, EVALUATION_DIR, SCORES_FILE, load_answers, load_scores
+from scripts.label_answers import CRITERIA, EVALUATION_DIR, SETS, load_answers, load_scores
 
 RESULTS_DIR = EVALUATION_DIR / "results"
-KINDS_FILE = EVALUATION_DIR / "answer_kinds.json"
 LAZY_SCORE = 3  # a judge that says 3 to everything, without reading the answer
 
 
-def run_path(label: str, run: int, folder: Path = RESULTS_DIR) -> Path:
-    """Run 1 keeps the plain name, so the first results don't move when more runs are added."""
-    return folder / (f"{label}.json" if run == 1 else f"{label}_run{run}.json")
+def run_path(label: str, run: int, folder: Path = RESULTS_DIR, answer_set: str = "main") -> Path:
+    """Run 1 keeps the plain name, so the first results don't move when more runs are added. The
+    main set keeps its old names too, and other sets get their name in front."""
+    prefix = "" if answer_set == "main" else f"{answer_set}_"
+    return folder / (f"{prefix}{label}.json" if run == 1 else f"{prefix}{label}_run{run}.json")
 
 
 def as_interview(answer: dict) -> SimpleNamespace:
@@ -65,7 +67,7 @@ def save_results(path: Path, label: str, model: str, results: dict[int, dict]) -
 
 
 def score_missing(
-    answers: list[dict], results: dict[int, dict], llm: LLMClient, save
+    answers: list[dict], results: dict[int, dict], llm: LLMClient, save, prompt_version: str = "v1"
 ) -> list[tuple[int, str]]:
     """Scores what isn't done yet. A failed answer is skipped and tried on the next run."""
     failures = []
@@ -73,7 +75,7 @@ def score_missing(
         if answer["id"] in results:
             continue
         try:
-            report = score_session(as_interview(answer), llm)
+            report = score_session(as_interview(answer), llm, prompt_version)
         except LLMError as e:
             failures.append((answer["id"], str(e)[:120]))
             print(f"Answer {answer['id']}: failed, try again later: {str(e)[:120]}", flush=True)
@@ -192,28 +194,32 @@ def print_report(
         print(f"  AI's reason: {row['explanation'][:230]}")
 
 
-def load_kinds() -> dict[str, str]:
-    data = json.loads(KINDS_FILE.read_text(encoding="utf-8"))
+def load_kinds(answer_set: str = "main") -> dict[str, str]:
+    data = json.loads(SETS[answer_set]["kinds"].read_text(encoding="utf-8"))
     data.pop("_warning", None)
     return data
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare the AI judge with my own scores.")
-    parser.add_argument("--label", required=True, help="the prompt version, such as v1")
+    parser.add_argument("--label", required=True, help="the prompt version, such as v1 or v2")
     parser.add_argument("--report", action="store_true", help="only the report: no Gemini calls")
     parser.add_argument("--run", type=int, default=1, help="another run of the same version")
+    parser.add_argument("--set", choices=SETS, default="main", help="which answers to score")
     args = parser.parse_args()
 
-    answers = load_answers()
-    mine = load_scores(SCORES_FILE)
+    answers = load_answers(SETS[args.set]["answers"])
+    mine = load_scores(SETS[args.set]["scores"])
     missing = missing_scores(answers, mine)
     if missing:
         raise SystemExit(
-            f"Score these yourself first: {missing}. uv run python -m scripts.label_answers"
+            f"Score these yourself first: {missing}. "
+            f"uv run python -m scripts.label_answers --set {args.set}"
         )
 
-    path = run_path(args.label, args.run)
+    if args.label not in PROMPT_ADDITIONS:
+        raise SystemExit(f"No prompt version {args.label!r}. Known: {list(PROMPT_ADDITIONS)}")
+    path = run_path(args.label, args.run, answer_set=args.set)
     results = load_results(path)
     if not args.report:
         # Here and not at the top: --report needs no Gemini key, and importing jobs loads a lot.
@@ -222,12 +228,16 @@ def main() -> None:
 
         model = get_settings().llm_model
         failures = score_missing(
-            answers, results, _llm(), lambda r: save_results(path, args.label, model, r)
+            answers,
+            results,
+            _llm(),
+            lambda r: save_results(path, args.label, model, r),
+            args.label,
         )
         if failures:
             print(f"\n{len(failures)} failed. Run the same command later to score only those.")
     if results:
-        print_report(mine, results, load_kinds())
+        print_report(mine, results, load_kinds(args.set))
 
 
 if __name__ == "__main__":

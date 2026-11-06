@@ -60,3 +60,16 @@ def test_stability_on_numbers_worked_out_by_hand():
     assert stats["within_1"] == 75
     assert stats["average_range"] == 0.75
     assert stats["largest"] == 2
+
+
+def test_the_confirmation_set_has_its_own_result_files(tmp_path):
+    assert run_path("v3", 1, tmp_path, "holdout").name == "holdout_v3.json"
+    assert run_path("v3", 2, tmp_path, "holdout").name == "holdout_v3_run2.json"
+
+
+def test_runs_of_the_two_sets_are_never_mixed(tmp_path):
+    save_results(run_path("v1", 1, tmp_path), "v1", "m", {1: ai(1, 1, 1, 1)})
+    save_results(run_path("v1", 1, tmp_path, "holdout"), "v1", "m", {101: ai(5, 5, 5, 5)})
+
+    assert set(find_runs("v1", tmp_path)[0]) == {1}
+    assert set(find_runs("v1", tmp_path, "holdout")[0]) == {101}
