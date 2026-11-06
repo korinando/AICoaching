@@ -38,11 +38,15 @@ COPY alembic ./alembic
 COPY alembic.ini ./
 COPY scripts ./scripts
 
+# Where Whisper models and the Piper voice go. Locally, docker-compose.yml puts my downloaded copies
+# here. In the cloud they start empty and the app downloads into them, so `app` must own them.
+RUN mkdir whisper_models voices && chown app:app whisper_models voices
+
 USER app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app PYTHONUNBUFFERED=1
 
-# Models and voices aren't in the image (up to 1.6 GB). They arrive as a folder at runtime:
-# WHISPER_MODELS_DIR for Whisper, and /app/voices for Piper.
+# Models and voices aren't in the image (up to 1.6 GB): mounted from my PC locally, or downloaded on
+# first use in the cloud.
 
 EXPOSE 8000
 # The API. Hosting platforms often choose the port and pass it as PORT, so it's read at start; sh -c

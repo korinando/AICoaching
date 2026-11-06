@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/.env, found from this file's location, so it works whatever folder you start in.
@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
     database_url: str
+
+    @field_validator("database_url")
+    @classmethod
+    def _use_psycopg_driver(cls, url: str) -> str:
+        """Hosting platforms give postgresql:// (or postgres://), which SQLAlchemy reads as
+        "use psycopg2". This app uses psycopg 3, so name it, and the platform's value works as is."""
+        for prefix in ("postgresql://", "postgres://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url.removeprefix(prefix)
+        return url
+
     # SecretStr hides the value in print/logs/tracebacks: it shows as '**********'.
     # Read the real value with .get_secret_value() only where it's needed.
     jwt_secret: SecretStr = Field(min_length=32)

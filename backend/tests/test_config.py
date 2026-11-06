@@ -50,3 +50,19 @@ def test_secrets_are_hidden_when_printed(env):
     assert "fake-key" not in repr(settings)
     assert "fake-secret" not in repr(settings)
     assert settings.gemini_api_key.get_secret_value() == "fake-key"
+
+
+@pytest.mark.parametrize(
+    "given",
+    [
+        "postgresql://user:pw@db.internal:5432/railway",  # what hosting platforms usually give
+        "postgres://user:pw@db.internal:5432/railway",  # an older spelling some still use
+        "postgresql+psycopg://user:pw@db.internal:5432/railway",  # already right: unchanged
+    ],
+)
+def test_database_url_always_uses_the_psycopg_driver(env, given):
+    """SQLAlchemy reads plain postgresql:// as "use psycopg2", which isn't installed (we use
+    psycopg 3), so the app would crash at the first query on the hosting platform."""
+    env.setenv("DATABASE_URL", given)
+
+    assert load().database_url == "postgresql+psycopg://user:pw@db.internal:5432/railway"

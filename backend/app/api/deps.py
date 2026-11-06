@@ -99,7 +99,9 @@ SpeechToTextDep = Annotated[SpeechToText, Depends(get_speech_to_text)]
 @lru_cache
 def get_text_to_speech() -> TextToSpeech:
     """One Piper voice for the whole server: loading it takes seconds. Tests use a fake."""
-    return PiperTextToSpeech(VOICES_DIR / f"{get_settings().piper_voice}.onnx")
+    return PiperTextToSpeech(
+        VOICES_DIR / f"{get_settings().piper_voice}.onnx", download_if_missing=True
+    )
 
 
 TextToSpeechDep = Annotated[TextToSpeech, Depends(get_text_to_speech)]
