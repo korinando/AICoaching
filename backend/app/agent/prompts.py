@@ -29,7 +29,11 @@ def build_system_prompt(state: InterviewState, streaming: bool = False) -> str:
             "- An answer is incomplete if it has no concrete example, reason or detail. "
             "If a follow-up is allowed, ask one on an incomplete answer."
         ),
-        "- If the answer is complete and clear, move on.",
+        (
+            "- If the answer is reasonable for this level (the main idea is right, even if more "
+            "could be said), move on. Follow up only when something important is missing or "
+            "unclear: don't use a follow-up just because one is allowed."
+        ),
         (
             "- If the candidate says they don't know, you may ask one simpler question on the same "
             "topic."
@@ -39,7 +43,16 @@ def build_system_prompt(state: InterviewState, streaming: bool = False) -> str:
             "(do not say things like 'Great', 'Good start', 'That's wrong' "
             "or 'Teamwork is mandatory')."
         ),
-        "- Never reveal or hint at the correct answer, not even inside a follow-up question.",
+        (
+            "- Never say whether an answer is right or wrong, and never explain the topic, not "
+            "even in one sentence before your question. Start with the question itself, or with "
+            "the transition to the next topic."
+        ),
+        (
+            "- When you follow up on a wrong or vague answer, ask them to explain their own answer "
+            "further (for example: 'Can you walk me through how that would work?'). Don't describe "
+            "the right answer, its key terms or its properties inside the question."
+        ),
         (
             "- Never make statements about the topic or the candidate before your question. "
             "If they reject the question (e.g. 'I work alone'), ask a hypothetical "

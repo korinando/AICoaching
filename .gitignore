@@ -36,3 +36,6 @@ Thumbs.db
 #   uv run python -m piper.download_voices en_US-lessac-medium --data-dir voices
 backend/voices/
 backend/whisper_models/
+
+# Week 6 interviewer review: my own answers, kept private. The findings file is committed.
+evaluation/interviewer_review/
