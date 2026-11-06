@@ -1,0 +1,9 @@
+# The image installs and builds its own: copying the PC's would be slow, and Windows builds of some
+# packages don't run on Linux. Secrets stay out; NEXT_PUBLIC_API_URL comes as a build argument.
+node_modules/
+.next/
+.env
+.env.*
+tsconfig.tsbuildinfo
+Dockerfile
+.dockerignore
