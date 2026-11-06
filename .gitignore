@@ -39,3 +39,10 @@ backend/whisper_models/
 
 # Week 6 interviewer review: my own answers, kept private. The findings file is committed.
 evaluation/interviewer_review/
+
+# Private: kept on my PC, never on GitHub. My learning log, the course plan, my own
+# evaluation answers and scores, and my instructions for Claude Code.
+LEARNING_LOG.md
+CLAUDE.md
+AI Mock Interview Coach*.pdf
+evaluation/

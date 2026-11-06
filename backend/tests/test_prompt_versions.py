@@ -10,6 +10,7 @@ from app.scoring.prompts import (
 )
 from app.scoring.scorer import score_session
 from scripts.evaluate import as_interview, score_missing
+from scripts.label_answers import ANSWERS_FILE
 from tests.fakes import FakeLLMClient
 from tests.test_evaluate import ANSWER, judged
 
@@ -55,6 +56,9 @@ def test_an_unknown_version_is_refused():
         build_scoring_system("Role", "junior", "v9")
 
 
+@pytest.mark.skipif(
+    not ANSWERS_FILE.exists(), reason="evaluation/ is private and not in this checkout"
+)
 def test_the_example_answers_are_not_from_the_test_set():
     """Otherwise the prompt would hand the judge the answers it's tested on."""
     from scripts.label_answers import load_answers

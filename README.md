@@ -36,11 +36,11 @@ An AI judge (Gemini) scores each interview on 4 criteria, 1 to 5: technical accu
 - **Halo effect:** the AI gives an answer's 4 criteria more similar scores than I do (average gap between an answer's highest and lowest score 1.00 vs my 1.35), so one impression partly sets all 4.
 - **Code does what the AI can't be trusted to do:** the overall score is calculated in code, and every example the judge quotes is checked against the transcript before it reaches the report.
 
-Scripts: `backend/scripts/evaluate.py`, `consistency.py` and `version_table.py`. Data and results: [evaluation/](evaluation/).
+Scripts: `backend/scripts/evaluate.py`, `consistency.py` and `version_table.py`. The test answers and my scores aren't published: they're my own answers.
 
 ### The interviewer
 
-I read 5 real interviews against a checklist (one question at a time, follow-ups react to the answer, no feedback or hints, and so on): [evaluation/interviewer_review.md](evaluation/interviewer_review.md). The main problem was that the interviewer sometimes corrected the candidate and hinted at the answer. Replaying the same moments 4 times each, before and after a prompt fix:
+I read 5 real interviews against a checklist (one question at a time, follow-ups react to the answer, no feedback or hints, and so on). The main problem was that the interviewer sometimes corrected the candidate and hinted at the answer. Replaying the same moments 4 times each, before and after a prompt fix:
 
 | Behaviour | Before | After |
 |---|---|---|
@@ -58,6 +58,3 @@ uv sync
 uv run pytest
 ```
 
-## Learning log
-
-See [LEARNING_LOG.md](LEARNING_LOG.md).

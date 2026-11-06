@@ -19,6 +19,13 @@ from scripts.label_answers import (
 )
 
 KINDS_FILE = EVALUATION_DIR / "answer_kinds.json"
+
+# evaluation/ holds my own answers and scores, so it stays on my PC and isn't on GitHub. Tests marked
+# with this check that data: they run here and are skipped in CI (shown as "s", not as passed). The
+# other tests use made-up answers and always run.
+needs_my_data = pytest.mark.skipif(
+    not ANSWERS_FILE.exists(), reason="evaluation/ is private and not in this checkout"
+)
 ONE_ANSWER_SCORES = dict(zip(CRITERIA, [1, 2, 3, 4], strict=True))
 
 
@@ -44,6 +51,7 @@ def replies(monkeypatch, *typed):
 # --- The test set ------------------------------------------------------------------------------
 
 
+@needs_my_data
 def test_about_20_answers_with_unique_ids():
     ids = [answer["id"] for answer in load_answers()]
 
@@ -51,11 +59,13 @@ def test_about_20_answers_with_unique_ids():
     assert len(set(ids)) == len(ids)
 
 
+@needs_my_data
 def test_every_answer_has_what_the_scorer_needs():
     for answer in load_answers():
         assert answer["role"] and answer["level"] and answer["question"] and answer["answer"]
 
 
+@needs_my_data
 def test_the_type_of_answer_is_kept_out_of_the_answers_file():
     """Seeing "strong" or "weak" while scoring would bias me."""
     text = ANSWERS_FILE.read_text(encoding="utf-8")
@@ -64,16 +74,19 @@ def test_the_type_of_answer_is_kept_out_of_the_answers_file():
     assert "confident_but_wrong" not in text
 
 
+@needs_my_data
 def test_every_answer_has_a_type():
     assert set(kinds()) == {str(answer["id"]) for answer in load_answers()}
 
 
+@needs_my_data
 def test_the_set_has_the_tricky_cases_the_plan_asks_for():
     found = set(kinds().values())
 
     assert {"strong", "average", "weak", "confident_but_wrong", "correct_but_rambling"} <= found
 
 
+@needs_my_data
 def test_strong_and_weak_answers_are_not_grouped_together():
     """Scoring gets easier to guess, and less honest, if the order gives the quality away."""
     in_order = [kinds()[str(answer["id"])] for answer in load_answers()]
@@ -135,12 +148,14 @@ def run_tool(monkeypatch, tmp_path, *typed):
     return path
 
 
+@needs_my_data
 def test_stopping_keeps_what_was_scored_and_loses_the_rest(monkeypatch, tmp_path):
     path = run_tool(monkeypatch, tmp_path, "1", "2", "3", "4", "5", "q")
 
     assert load_scores(path) == {1: ONE_ANSWER_SCORES}
 
 
+@needs_my_data
 def test_carrying_on_starts_at_the_next_answer(monkeypatch, tmp_path, capsys):
     run_tool(monkeypatch, tmp_path, "1", "2", "3", "4", "q")
     capsys.readouterr()
@@ -151,6 +166,7 @@ def test_carrying_on_starts_at_the_next_answer(monkeypatch, tmp_path, capsys):
     assert "Answer 2 of 20" in capsys.readouterr().out
 
 
+@needs_my_data
 def test_the_tool_never_shows_the_type_of_answer(monkeypatch, tmp_path, capsys):
     run_tool(monkeypatch, tmp_path, *["3"] * (4 * 20))
 
@@ -167,6 +183,7 @@ def holdout() -> list[dict]:
     return load_answers(SETS["holdout"]["answers"])
 
 
+@needs_my_data
 def test_the_confirmation_set_is_separate_from_the_tuning_set():
     """New answers: a version that only fits the first 20 shouldn't pass here."""
     main_ids = {a["id"] for a in load_answers()}
@@ -177,6 +194,7 @@ def test_the_confirmation_set_is_separate_from_the_tuning_set():
         assert answer["question"] not in main_questions
 
 
+@needs_my_data
 def test_the_confirmation_set_has_its_own_hidden_types():
     data = json.loads(SETS["holdout"]["kinds"].read_text(encoding="utf-8"))
     data.pop("_warning")
@@ -190,6 +208,7 @@ def test_the_confirmation_set_has_its_own_scores_file():
     assert SETS["holdout"]["scores"] != SETS["main"]["scores"]
 
 
+@needs_my_data
 def test_labeling_the_confirmation_set_never_touches_the_main_scores(monkeypatch, tmp_path):
     main_before = SETS["main"]["scores"].read_bytes()
     path = tmp_path / "holdout.csv"
