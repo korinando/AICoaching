@@ -7,6 +7,7 @@ Refuses to run until I've scored everything, because the AI's scores would bias 
 Run from backend/:
     uv run python -m scripts.evaluate --label v1          # scores what's missing, then reports
     uv run python -m scripts.evaluate --label v1 --report # only the report: no Gemini calls
+    uv run python -m scripts.evaluate --label v1 --run 2  # the same again, for consistency
 """
 
 import argparse
@@ -23,6 +24,11 @@ from scripts.label_answers import CRITERIA, EVALUATION_DIR, SCORES_FILE, load_an
 RESULTS_DIR = EVALUATION_DIR / "results"
 KINDS_FILE = EVALUATION_DIR / "answer_kinds.json"
 LAZY_SCORE = 3  # a judge that says 3 to everything, without reading the answer
+
+
+def run_path(label: str, run: int, folder: Path = RESULTS_DIR) -> Path:
+    """Run 1 keeps the plain name, so the first results don't move when more runs are added."""
+    return folder / (f"{label}.json" if run == 1 else f"{label}_run{run}.json")
 
 
 def as_interview(answer: dict) -> SimpleNamespace:
@@ -196,6 +202,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Compare the AI judge with my own scores.")
     parser.add_argument("--label", required=True, help="the prompt version, such as v1")
     parser.add_argument("--report", action="store_true", help="only the report: no Gemini calls")
+    parser.add_argument("--run", type=int, default=1, help="another run of the same version")
     args = parser.parse_args()
 
     answers = load_answers()
@@ -206,7 +213,7 @@ def main() -> None:
             f"Score these yourself first: {missing}. uv run python -m scripts.label_answers"
         )
 
-    path = RESULTS_DIR / f"{args.label}.json"
+    path = run_path(args.label, args.run)
     results = load_results(path)
     if not args.report:
         # Here and not at the top: --report needs no Gemini key, and importing jobs loads a lot.
