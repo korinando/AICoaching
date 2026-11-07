@@ -46,3 +46,7 @@ LEARNING_LOG.md
 CLAUDE.md
 AI Mock Interview Coach*.pdf
 evaluation/
+
+# One-off deploy helpers, kept on my PC.
+deploy-wizard.sh
+deploy_check.py
