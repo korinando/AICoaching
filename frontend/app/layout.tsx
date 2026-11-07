@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Mock Interview Coach",
+  title: "Offerward",
   description: "Practise job interviews with an AI interviewer",
 };
 
