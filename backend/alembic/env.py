@@ -17,7 +17,9 @@ config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%"
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: by default this silences every logger that already exists,
+    # so after migrations ran (in tests, or before the seed on deploy) the app's logs vanished.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # All our tables. `alembic revision --autogenerate` compares this with the real database
 # and writes the difference as a migration.

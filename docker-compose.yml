@@ -69,7 +69,8 @@ services:
     build: ./backend
     image: ai-coach-backend # one image, shared with the API
     restart: unless-stopped
-    command: rq worker reports --url redis://redis:6379/0
+    # Our start script: rq plus production logs and Sentry. REDIS_URL comes from *backend-env.
+    command: python -m app.workers.main
     env_file: ./backend/.env
     environment: *backend-env
     volumes:

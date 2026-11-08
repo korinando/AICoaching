@@ -55,6 +55,7 @@ from app.api.ws_messages import (
     TurnComplete,
     parse_client_message,
 )
+from app.core.observability import bind_session
 from app.core.security import TokenError, decode_token
 from app.models import InterviewSession
 from app.services.interviews import (
@@ -418,6 +419,9 @@ async def interview_socket(
     report_queue: ReportQueueDep,
 ) -> None:
     """Answers are handled one at a time, in the order they arrive."""
+    # Each connection runs in its own task: every log line and error from here on, including
+    # those from the threads below, says which interview it was.
+    bind_session(session_id)
     interview = Interview(session_id, db, interviewer, storage, speech_to_text, tts, report_queue)
     await websocket.accept()  # first, or we couldn't receive the token or explain a refusal
     if not await authenticate(websocket, interview):

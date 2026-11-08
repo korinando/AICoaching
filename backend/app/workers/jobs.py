@@ -10,6 +10,7 @@ from app.agent.llm_client import GeminiLLMClient
 from app.api.deps import get_audio_storage
 from app.core.config import get_settings
 from app.core.db import get_engine
+from app.core.observability import bind_session
 from app.models import InterviewSession
 from app.scoring.scorer import score_session
 from app.services.reports import fill_report
@@ -42,5 +43,6 @@ def score_interview(session: InterviewSession) -> dict[str, Any]:
 
 
 def generate_report(session_id: int) -> None:
+    bind_session(session_id)  # each job runs in a process of its own, so this can't leak
     with Session(get_engine()) as db:
         fill_report(db, session_id, score_interview)

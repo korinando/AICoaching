@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -16,4 +17,17 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Brave and ad blockers block requests to sentry.io. Sent to /monitoring on this site
+  // instead, the Next.js server passes them on, so errors from those browsers still arrive.
+  tunnelRoute: "/monitoring",
+  // Readable stack traces: the build uploads its source maps to Sentry, then deletes them so
+  // visitors can't download the original code. Only when these are set (on Vercel); without
+  // them, the build skips the upload and works as before.
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+  silent: !process.env.CI,
+  telemetry: false, // don't send Sentry data about my builds
+});

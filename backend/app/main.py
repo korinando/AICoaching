@@ -13,7 +13,10 @@ from sqlalchemy.exc import OperationalError
 from app.api import auth, health, sessions, templates, ws
 from app.api.deps import get_speech_to_text, get_text_to_speech
 from app.core.config import get_settings
+from app.core.observability import setup_observability
 
+# First, so even an error while starting up is logged the production way and reaches Sentry.
+setup_observability("api")
 logger = logging.getLogger(__name__)
 
 

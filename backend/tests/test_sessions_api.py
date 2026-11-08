@@ -107,3 +107,16 @@ def test_owner_still_has_access(client, auth_headers, other_headers, fake_llm, t
     session = start(client, auth_headers, fake_llm, template)
 
     assert client.get(f"/sessions/{session['id']}", headers=auth_headers).status_code == 200
+
+
+def test_every_route_of_one_session_tags_its_logs_with_the_session_id():
+    """Week 7 Step 6: a log line written while serving /sessions/{id}/... carries that id."""
+    from fastapi.routing import APIRoute
+
+    from app.api.sessions import router
+    from app.core.observability import bind_session_from_path
+
+    routes = [r for r in router.routes if isinstance(r, APIRoute) and "{session_id}" in r.path]
+    assert routes
+    for route in routes:
+        assert bind_session_from_path in [d.dependency for d in route.dependencies], route.path

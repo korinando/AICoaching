@@ -295,6 +295,19 @@ def test_unexpected_crash_is_a_server_error_and_the_interview_continues(
         assert messages_of_one_reply(socket)[1]["text"] == REPLY
 
 
+def test_a_crash_is_logged_with_its_session_id(client, session_id, token, tts, caplog):
+    """In production, the log line must say which interview failed (Week 7 Step 6)."""
+    tts.error = RuntimeError("a bug, not a known failure")
+    with connect(client, session_id) as socket:
+        login(socket, token)
+        socket.send_json({"type": "text_answer", "text": ANSWER})
+        while socket.receive_json()["type"] != "error":
+            pass
+    (failed,) = [r for r in caplog.records if "answer failed" in r.message]
+    assert failed.session_id == session_id
+    assert failed.exc_info  # with its traceback, which Sentry also receives
+
+
 # --- Ending ------------------------------------------------------------------------------------
 
 

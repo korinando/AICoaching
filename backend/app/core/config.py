@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     whisper_models_dir: Path = WHISPER_MODELS_DIR
     # A file in backend/voices/, downloaded with: uv run python -m piper.download_voices
     piper_voice: str = "en_US-lessac-medium"
+    # Monitoring (Week 7 Step 6). JSON log lines in production (the Dockerfile turns it on);
+    # readable text in development. Errors go to Sentry only when its DSN is set, on Railway.
+    log_json: bool = False
+    sentry_dsn: SecretStr = SecretStr("")
 
 
 @lru_cache

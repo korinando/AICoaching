@@ -44,6 +44,9 @@ RUN mkdir whisper_models voices && chown app:app whisper_models voices
 
 USER app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app PYTHONUNBUFFERED=1
+# One JSON object per log line, in every container (Railway and docker compose alike). Plain
+# `uv run` on my PC keeps readable text.
+ENV LOG_JSON=true
 
 # Models and voices aren't in the image (up to 1.6 GB): mounted from my PC locally, or downloaded on
 # first use in the cloud.
@@ -51,5 +54,5 @@ ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app PYTHONUNBUFFERED=1
 EXPOSE 8000
 # The API. Hosting platforms often choose the port and pass it as PORT, so it's read at start; sh -c
 # is what fills in ${PORT}. `exec` lets uvicorn receive the stop signal directly and shut down cleanly.
-# The worker uses this image with: rq worker reports --url ...
+# The worker uses this image with: python -m app.workers.main
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

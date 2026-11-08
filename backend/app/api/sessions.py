@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 
 from app.api.deps import (
@@ -17,13 +17,17 @@ from app.api.schemas import (
     SessionOut,
     SessionSummaryOut,
 )
+from app.core.observability import bind_session_from_path
 from app.models import FeedbackReport, InterviewSession, InterviewTemplate, Turn, User
 from app.scoring.rubric import RUBRIC
 from app.services.interviews import speak_turns, start_interview
 from app.services.reports import can_request_report, get_report, request_report_again
 from app.speech.storage import StorageError
 
-router = APIRouter(prefix="/sessions", tags=["sessions"])
+# Every route under /sessions/{session_id} tags its log lines and errors with that id (Step 6).
+router = APIRouter(
+    prefix="/sessions", tags=["sessions"], dependencies=[Depends(bind_session_from_path)]
+)
 
 # Enough for a person to look through, and a limit on the work one request can cause.
 MAX_HISTORY_ROWS = 100
