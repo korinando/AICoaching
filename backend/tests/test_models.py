@@ -14,6 +14,7 @@ def test_all_tables_are_registered():
         "feedback_reports",
         "interview_sessions",
         "turns",
+        "usage_limits",
     }
 
 

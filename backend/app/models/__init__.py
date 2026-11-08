@@ -5,6 +5,7 @@ from app.models.feedback_report import REPORT_STATUSES, FeedbackReport
 from app.models.interview_session import SESSION_STATUSES, InterviewSession
 from app.models.template import InterviewTemplate
 from app.models.turn import Turn
+from app.models.usage_limit import UsageLimit
 from app.models.user import User
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "InterviewSession",
     "InterviewTemplate",
     "Turn",
+    "UsageLimit",
     "User",
 ]

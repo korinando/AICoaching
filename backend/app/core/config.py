@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # readable text in development. Errors go to Sentry only when its DSN is set, on Railway.
     log_json: bool = False
     sentry_dsn: SecretStr = SecretStr("")
+    # Cost protection (Week 7 Step 7). Every turn of an interview calls 3 paid services, so one
+    # account may start this many interviews per day (UTC).
+    daily_session_limit: int = Field(default=5, ge=1)
+    # The header in which a trusted proxy puts the visitor's real address. Empty: there's no
+    # proxy, use the connection's address. On Railway: X-Real-IP.
+    proxy_ip_header: str = ""
 
 
 @lru_cache

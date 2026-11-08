@@ -12,13 +12,20 @@ from app.agent.schemas import InterviewState
 from app.agent.templates import new_state
 from app.api.deps import get_audio_storage, get_interviewer, get_text_to_speech
 from app.core.db import get_db
+from app.core.rate_limit import get_rate_limiter
 from app.core.security import create_token
 from app.main import app
 from app.models import Base, InterviewSession, InterviewTemplate, Turn, User
 from app.workers.queue import get_queue
 from tests.audio_samples import make_samples
 from tests.db_utils import scratch_database_url
-from tests.fakes import FakeAudioStorage, FakeLLMClient, FakeQueue, FakeTextToSpeech
+from tests.fakes import (
+    AllowAllRateLimiter,
+    FakeAudioStorage,
+    FakeLLMClient,
+    FakeQueue,
+    FakeTextToSpeech,
+)
 
 TEST_DB_NAME = "ai_coach_test"
 
@@ -163,5 +170,6 @@ def client(
     app.dependency_overrides[get_audio_storage] = lambda: storage
     app.dependency_overrides[get_text_to_speech] = lambda: tts
     app.dependency_overrides[get_queue] = lambda: report_queue
+    app.dependency_overrides[get_rate_limiter] = AllowAllRateLimiter
     yield TestClient(app)
     app.dependency_overrides.clear()

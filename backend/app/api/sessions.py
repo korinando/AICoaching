@@ -18,10 +18,12 @@ from app.api.schemas import (
     SessionSummaryOut,
 )
 from app.core.observability import bind_session_from_path
+from app.core.rate_limit import SESSIONS_PER_USER, RateLimiterDep, enforce
 from app.models import FeedbackReport, InterviewSession, InterviewTemplate, Turn, User
 from app.scoring.rubric import RUBRIC
 from app.services.interviews import speak_turns, start_interview
 from app.services.reports import can_request_report, get_report, request_report_again
+from app.services.usage import DailyLimitReachedError, give_back_daily_session, take_daily_session
 from app.speech.storage import StorageError
 
 # Every route under /sessions/{session_id} tags its log lines and errors with that id (Step 6).
@@ -53,12 +55,29 @@ def create_session(
     interviewer: InterviewerDep,
     tts: TextToSpeechDep,
     storage: AudioStorageDep,
+    limiter: RateLimiterDep,
 ) -> SessionOut:
-    """Start an interview: the response already contains the opening question."""
+    """Start an interview: the response already contains the opening question.
+
+    Cost protection (Week 7 Step 7), both checked before Gemini is asked anything: a few starts
+    per 10 minutes, and a number per day. A request that can't succeed (unknown template)
+    counts against neither.
+    """
     template = db.get(InterviewTemplate, body.template_id)
     if template is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
-    session = start_interview(db, user, template, interviewer)
+    enforce(limiter, SESSIONS_PER_USER, str(user.id))
+    try:
+        day = take_daily_session(db, user.id)
+    except DailyLimitReachedError as e:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(e)) from None
+    try:
+        session = start_interview(db, user, template, interviewer)
+    except Exception:
+        # It didn't start, so it doesn't count. Then the error goes on as before.
+        db.rollback()
+        give_back_daily_session(db, user.id, day)
+        raise
     speak_turns(db, session, session.turns, tts, storage)
     return SessionOut.model_validate(session)
 

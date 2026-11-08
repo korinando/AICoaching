@@ -128,3 +128,21 @@ def spoken(text: str) -> bytes:
         wav_file.setparams((1, 1, 16_000, 0, "NONE", "not compressed"))
         wav_file.writeframes(text.encode())
     return buffer.getvalue()
+
+
+class AllowAllRateLimiter:
+    """The default in tests: no limits, so tests that log in or start many interviews work."""
+
+    def hit(self, rule, key: str) -> int | None:
+        return None
+
+
+class MemoryRateLimiter:
+    """Counts like RedisRateLimiter, in memory, with a window that never ends during a test."""
+
+    def __init__(self) -> None:
+        self.counts: dict[tuple[str, str], int] = {}
+
+    def hit(self, rule, key: str) -> int | None:
+        self.counts[rule.name, key] = self.counts.get((rule.name, key), 0) + 1
+        return rule.seconds if self.counts[rule.name, key] > rule.times else None
