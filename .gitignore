@@ -41,8 +41,9 @@ backend/whisper_models/
 evaluation/interviewer_review/
 
 # Private: kept on my PC, never on GitHub. My learning log, the course plan, my own
-# evaluation answers and scores, and my instructions for Claude Code.
+# evaluation answers and scores, my friends' test notes, and my instructions for Claude Code.
 LEARNING_LOG.md
+USER_TESTING.md
 CLAUDE.md
 AI Mock Interview Coach*.pdf
 evaluation/
