@@ -1,3 +1,6 @@
+"""The interviewer's prompts, built from the interview state. Only the actions allowed right
+now are offered, from the same allowed_actions() that the rules check."""
+
 from app.agent.history import earlier_summary, omitted_count, recent_messages
 from app.agent.schemas import Action, InterviewState, Message
 
@@ -91,6 +94,7 @@ def build_system_prompt(state: InterviewState, streaming: bool = False) -> str:
 
 
 def format_transcript(history: list[Message]) -> str:
+    """One line per message: "Interviewer: ..." or "Candidate: ..."."""
     return "\n".join(f"{m.role.capitalize()}: {m.text}" for m in history)
 
 

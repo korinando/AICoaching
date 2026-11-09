@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await loading
 
 
-app = FastAPI(title="AI Mock Interview Coach", lifespan=lifespan)
+app = FastAPI(title="Offerward API", lifespan=lifespan)
 
 # CORS: browsers block a page on one origin (localhost:3000) from reading responses from
 # another (localhost:8000) unless the server says it's allowed. Only the listed origins are.

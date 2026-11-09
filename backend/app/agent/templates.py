@@ -1,3 +1,5 @@
+"""The interview templates in templates.json, and a fresh InterviewState made from one."""
+
 from pathlib import Path
 
 from pydantic import BaseModel, Field, TypeAdapter

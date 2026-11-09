@@ -1,3 +1,5 @@
+"""The shape of the judge's reply. Field order matters: Gemini writes the fields in this order."""
+
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +22,8 @@ class CriterionVerdict(BaseModel):
 
 
 class OverallVerdict(BaseModel):
+    """One verdict for each of the 4 rubric criteria."""
+
     technical_accuracy: CriterionVerdict
     clarity: CriterionVerdict
     structure: CriterionVerdict

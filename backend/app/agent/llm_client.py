@@ -1,3 +1,6 @@
+"""Talking to the LLM: one interface (LLMClient), the Gemini version of it, and reading the
+ACTION line at the start of a streamed reply."""
+
 from collections.abc import Iterable, Iterator
 from typing import Any, Protocol, TypeVar, get_args
 
@@ -11,11 +14,11 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class LLMError(Exception):
-    """The LLM call failed: network, timeout, overload, or an invalid reply"""
+    """The LLM call failed: network, timeout, overload, or an invalid reply."""
 
 
 class LLMClient(Protocol):
-    """Anything that can turn a prompt into an AgentDeCision."""
+    """Anything that can answer a prompt: Gemini in the app, FakeLLMClient in tests."""
 
     def decide(self, system: str, user: str) -> AgentDecision:
         """Return the next decision, or raise LLMError if anything goes wrong."""
@@ -69,6 +72,7 @@ class GeminiLLMClient:
         self.client = genai.Client(api_key=api_key)
 
     def decide(self, system: str, user: str) -> AgentDecision:
+        """One decision as JSON, checked against AgentDecision. Used by the terminal runner."""
         try:
             interaction = self.client.interactions.create(
                 model=self.model,
@@ -91,6 +95,7 @@ class GeminiLLMClient:
             raise LLMError(f"{type(e).__name__}: {e}") from e
 
     def complete_json(self, system: str, user: str, schema: type[T]) -> T:
+        """A whole reply as JSON in the given schema. Used by the report judge."""
         config = types.GenerateContentConfig(
             system_instruction=system,
             thinking_config=types.ThinkingConfig(thinking_level="low"),
@@ -111,6 +116,10 @@ class GeminiLLMClient:
             raise LLMError(f"{type(e).__name__}: {e}") from e
 
     def stream(self, system: str, user: str) -> Iterator[str]:
+        """The reply as plain text, piece by piece as Gemini writes it. Used in live interviews.
+
+        Token usage is counted at the end, even if the stream fails part way.
+        """
         config = types.GenerateContentConfig(
             system_instruction=system,
             thinking_config=types.ThinkingConfig(thinking_level="low"),

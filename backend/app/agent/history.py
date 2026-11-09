@@ -1,3 +1,6 @@
+"""How much of the conversation the LLM sees: the last few messages in full, and earlier
+topics only as a short summary, so the prompt stays small however long the interview gets."""
+
 from app.agent.schemas import InterviewState, Message
 
 # 6 messages = 3 question/answer pairs: enough for the current topic plus its 2 follow-ups.

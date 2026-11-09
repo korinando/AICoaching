@@ -21,12 +21,19 @@ RETRY_WAIT_S = 20
 
 @dataclass
 class QuestionAnswer:
+    """One question and the candidate's answer to it. number is what the judge cites."""
+
     number: int
     question: str
     answer: str
 
 
 def build_pairs(turns: list) -> list[QuestionAnswer]:
+    """Pair each answer with the question it answers, numbered from 1.
+
+    A fixed rule reply ("Could you say a bit more?") isn't a new question, so the answer
+    after it still belongs to the question before.
+    """
     pairs = []
     question = None
     for turn in turns:
@@ -75,6 +82,12 @@ def _ask_with_retries(llm: LLMClient, system: str, user: str, pairs: list) -> Ju
 def score_session(
     session: InterviewSession, llm: LLMClient, prompt_version: str = PROMPT_VERSION
 ) -> dict[str, Any]:
+    """Score a finished interview, as the fields of a feedback report.
+
+    Gemini judges each criterion with quotes as evidence. The code checks that the quotes are
+    really in the transcript (asking again if not) and calculates the overall score itself.
+    Raises ValueError when there's nothing to score, and LLMError when every attempt fails.
+    """
     pairs = build_pairs(session.turns)
     if not pairs:
         raise ValueError("No answers to score")

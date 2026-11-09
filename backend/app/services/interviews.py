@@ -131,30 +131,6 @@ def abandon_interview(db: Session, session: InterviewSession) -> None:
     db.commit()
 
 
-def submit_answer(
-    db: Session,
-    session: InterviewSession,
-    answer: str,
-    interviewer: Interviewer,
-    audio_key: str | None = None,
-    stt_ms: int | None = None,
-) -> str:
-    """Handle one candidate answer and return the interviewer's reply.
-
-    audio_key and stt_ms: where the recording is stored and how long Whisper took, for a
-    spoken answer; None for a typed one.
-    """
-    if session.status != "in_progress":
-        raise InterviewClosedError(f"Session {session.id} is {session.status}")
-    state = load_state(session)
-    first_new = len(state.history)
-    started = time.perf_counter()
-    reply = interviewer.handle_answer(state, answer)
-    llm_ms = elapsed_ms(started)  # includes any retry; about 0 if a rule answered without the LLM
-    save_answer(db, session, state, first_new, audio_key, stt_ms, llm_ms)
-    return reply
-
-
 def save_answer(
     db: Session,
     session: InterviewSession,

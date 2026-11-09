@@ -1,3 +1,6 @@
+"""The interviewer agent: the LLM suggests what to do next, code enforces the interview rules."""
+
+import logging
 from collections.abc import Iterator
 
 from app.agent.llm_client import LLMClient, LLMError, read_action
@@ -12,6 +15,8 @@ MAX_SHORT_ANSWER_RETRIES = 2
 REPEAT_TEXT = "Could you say a bit more about that?"
 OWN_WORDS_TEXT = "Please answer the question in your own words."
 CLOSING_TEXT = "Thank you for your time today. That's the end of our interview."
+
+logger = logging.getLogger(__name__)
 
 
 class Interviewer:
@@ -46,7 +51,7 @@ class Interviewer:
         try:
             return self.llm.decide(system, user)
         except LLMError as first_error:
-            print(f"[llm] attempt 1 failed: {first_error}")
+            logger.warning("LLM attempt 1 failed: %s", first_error)
             # Telling the model what went wrong often fixes a bad reply; a network error may
             # simply succeed on the second try.
             retry_user = (
@@ -56,7 +61,7 @@ class Interviewer:
             try:
                 return self.llm.decide(system, retry_user)
             except LLMError as second_error:
-                print(f"[llm] attempt 2 failed: {second_error}, using fallback")
+                logger.warning("LLM attempt 2 failed, using the fallback: %s", second_error)
                 return self._fallback_decision(state)
 
     def _fallback_decision(self, state: InterviewState) -> AgentDecision:
@@ -79,7 +84,7 @@ class Interviewer:
         # Every disallowed case means "move forward": follow-ups used up -> next topic,
         # next_question on the last topic -> end, early end -> next topic.
         forward: Action = "end" if state.is_last_topic else "next_question"
-        print(f"[rule] {decision.action} not allowed -> {forward}")
+        logger.info("Rule: %s not allowed, using %s", decision.action, forward)
         # The LLM's text was written for its own action, so it no longer fits; use our own.
         # Must run before _apply_decision, while state.next_topic still points to the right topic.
         if forward == "end":
@@ -138,7 +143,7 @@ class Interviewer:
         try:
             return read_action(self.llm.stream(system, user))
         except LLMError as first_error:
-            print(f"[llm] attempt 1 failed: {first_error}")
+            logger.warning("LLM attempt 1 failed: %s", first_error)
             retry_user = (
                 f"{user}\n\nYour previous reply could not be used ({first_error}). "
                 "Reply again in the required format."
@@ -146,7 +151,7 @@ class Interviewer:
             try:
                 return read_action(self.llm.stream(system, retry_user))
             except LLMError as second_error:
-                print(f"[llm] attempt 2 failed: {second_error}, using fallback")
+                logger.warning("LLM attempt 2 failed, using the fallback: %s", second_error)
                 fallback = self._fallback_decision(state)
                 return fallback.action, iter([fallback.text])
 
@@ -185,7 +190,7 @@ class Interviewer:
         except LLMError as e:
             # Words already spoken can't be taken back, so a retry would repeat them.
             # Carry on with what the candidate actually heard.
-            print(f"[llm] stream failed after {len(said)} pieces: {e}")
+            logger.warning("LLM stream failed after %d pieces: %s", len(said), e)
 
         self._apply_decision(state, decision.action)
         state.history.append(Message(role="interviewer", text="".join(said).strip()))
