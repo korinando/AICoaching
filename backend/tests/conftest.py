@@ -104,6 +104,7 @@ def template(db: Session) -> InterviewTemplate:
         role="Junior Backend Developer",
         level="junior",
         interview_type="technical",
+        summary="APIs, databases and reliable code.",
         topics=["REST APIs", "Databases", "Git", "Debugging", "Teamwork"],
         max_main_questions=5,
         max_follow_ups=2,

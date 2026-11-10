@@ -1,117 +1,151 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { ProgressChart } from "@/components/charts";
+import { PlusIcon } from "@/components/icons";
+import { useOpenNewInterview } from "@/components/NewInterview";
+import { useAppData } from "@/lib/appData";
 
-import {
-  createSession,
-  getMe,
-  listTemplates,
-  logout,
-  type Template,
-  type User,
-} from "@/lib/api";
-import { useRequireLogin } from "@/lib/useRequireLogin";
+/** The home page: how your scores are going. Interviews are started from the "New interview"
+ * pop-up (here or in the sidebar), and past ones are in the sidebar. */
+export default function HomePage() {
+  const { user, sessions } = useAppData();
+  const openNewInterview = useOpenNewInterview();
 
-export default function DashboardPage() {
-  const ready = useRequireLogin();
-  const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [startingId, setStartingId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!ready) return;
-    // Both requests at once, not one after the other.
-    Promise.all([getMe(), listTemplates()])
-      .then(([me, list]) => {
-        setUser(me);
-        setTemplates(list);
-      })
-      .catch(() => {
-        // Even the refresh token failed: the login has really expired.
-        logout();
-        router.replace("/login");
-      });
-  }, [ready, router]);
-
-  async function start(templateId: number) {
-    setStartingId(templateId);
-    setError(null);
-    try {
-      const session = await createSession(templateId); // includes the opening question (LLM call)
-      router.push(`/interview/${session.id}`);
-    } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Could not start the interview",
-      );
-      setStartingId(null);
-    }
-  }
-
-  if (!user) return <p className="p-6 text-zinc-500">Loading…</p>;
+  const scored = (sessions ?? [])
+    .filter((s) => s.overall_score !== null)
+    .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at));
 
   return (
-    <main className="mx-auto w-full max-w-3xl space-y-6 p-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">
-          Hi {user.name}, choose an interview
-        </h1>
-        <div className="flex shrink-0 gap-4">
-          <Link
-            href="/history"
-            className="text-sm text-zinc-500 hover:underline"
-          >
-            Past interviews
-          </Link>
-          <button
-            onClick={() => {
-              logout();
-              router.replace("/login");
-            }}
-            className="text-sm text-zinc-500 hover:underline"
-          >
-            Log out
-          </button>
+    <main className="mx-auto w-full max-w-4xl space-y-8 px-4 py-8 md:px-8 md:py-12">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-semibold tracking-tight">
+            {user ? `Hi ${user.name}` : " "}
+          </h1>
+          <p className="text-muted">
+            Practise out loud, then see how your scores change over time.
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={openNewInterview}
+          className="flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+        >
+          <PlusIcon className="h-4 w-4" />
+          New interview
+        </button>
       </header>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <ul className="grid gap-4 sm:grid-cols-2">
-        {templates.map((t) => (
-          <li
-            key={t.id}
-            className="space-y-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800"
-          >
-            <div>
-              <h2 className="font-semibold">{t.role}</h2>
-              <p className="text-sm text-zinc-500">
-                {t.interview_type} · {t.max_main_questions} questions
+      {sessions === null ? (
+        <div className="space-y-4" aria-label="Loading">
+          <div className="grid grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-28 animate-pulse rounded-2xl bg-surface-3"
+              />
+            ))}
+          </div>
+          <div className="h-64 animate-pulse rounded-2xl bg-surface-3" />
+        </div>
+      ) : scored.length === 0 ? (
+        <EmptyState started={sessions.length > 0} onStart={openNewInterview} />
+      ) : (
+        <section aria-labelledby="progress" className="space-y-4">
+          <h2 id="progress" className="text-lg font-semibold">
+            Your progress
+          </h2>
+          <Stats scores={scored.map((s) => s.overall_score as number)} />
+          <div className="rounded-2xl border border-line bg-surface p-4 md:p-5">
+            <h3 className="mb-3 text-sm font-medium text-muted">
+              Overall score per interview
+            </h3>
+            {scored.length >= 2 ? (
+              <ProgressChart
+                points={scored.map((s) => ({
+                  date: s.started_at,
+                  score: s.overall_score as number,
+                  label: s.role,
+                }))}
+              />
+            ) : (
+              <p className="py-6 text-center text-sm text-muted">
+                Finish one more interview to see how your score changes.
               </p>
-            </div>
-            <ul className="flex flex-wrap gap-1.5">
-              {t.topics.map((topic) => (
-                <li
-                  key={topic}
-                  className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800"
-                >
-                  {topic}
-                </li>
-              ))}
-            </ul>
-            <button
-              onClick={() => start(t.id)}
-              disabled={startingId !== null}
-              className="w-full rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              {startingId === t.id ? "Starting…" : "Start interview"}
-            </button>
-          </li>
-        ))}
-      </ul>
+            )}
+          </div>
+        </section>
+      )}
     </main>
+  );
+}
+
+function EmptyState({
+  started,
+  onStart,
+}: {
+  started: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <section className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-line bg-surface px-6 py-14 text-center">
+      <h2 className="text-lg font-semibold">
+        {started ? "No scores yet" : "Your first interview"}
+      </h2>
+      <p className="max-w-md text-sm text-muted">
+        {started
+          ? "Finish an interview with at least 3 answers, and its score shows up here a minute or two later."
+          : "Pick a role, answer 5 questions out loud, and get a scored report with what to work on."}
+      </p>
+      <button
+        type="button"
+        onClick={onStart}
+        className="flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+      >
+        <PlusIcon className="h-4 w-4" />
+        Start an interview
+      </button>
+    </section>
+  );
+}
+
+function Stats({ scores }: { scores: number[] }) {
+  const latest = scores[scores.length - 1];
+  const previous = scores.length > 1 ? scores[scores.length - 2] : null;
+  const average = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+  const change = previous === null ? null : latest - previous;
+
+  return (
+    <dl className="grid grid-cols-3 gap-3">
+      <Stat label="Latest score" value={latest.toFixed(1)}>
+        {change !== null && Math.abs(change) >= 0.05 && (
+          <span
+            className={`text-xs font-medium ${change > 0 ? "text-success" : "text-danger"}`}
+          >
+            {change > 0 ? "▲" : "▼"} {Math.abs(change).toFixed(1)} vs previous
+          </span>
+        )}
+      </Stat>
+      <Stat label="Average" value={average.toFixed(1)} />
+      <Stat label="Scored interviews" value={String(scores.length)} />
+    </dl>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  children,
+}: {
+  label: string;
+  value: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-4">
+      <dt className="text-xs text-muted sm:text-sm">{label}</dt>
+      <dd className="mt-1 text-2xl font-semibold sm:text-3xl">{value}</dd>
+      {children && <dd className="mt-1">{children}</dd>}
+    </div>
   );
 }

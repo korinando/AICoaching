@@ -40,10 +40,14 @@ export default function MicTestPage() {
       {message && <p className="text-sm text-zinc-500">{message}</p>}
       {recording && (
         <div className="space-y-2">
-          <audio controls src={URL.createObjectURL(recording.blob)} className="w-full" />
+          <audio
+            controls
+            src={URL.createObjectURL(recording.blob)}
+            className="w-full"
+          />
           <p className="text-sm text-zinc-500">
-            {recording.mimeType} · {(recording.blob.size / 1024).toFixed(1)} KB ·{" "}
-            {(recording.durationMs / 1000).toFixed(1)} s
+            {recording.mimeType} · {(recording.blob.size / 1024).toFixed(1)} KB
+            · {(recording.durationMs / 1000).toFixed(1)} s
           </p>
         </div>
       )}

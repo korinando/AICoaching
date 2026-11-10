@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
-from app.api import auth, health, sessions, templates, ws
+from app.api import admin, auth, health, sessions, templates, ws
 from app.api.deps import get_speech_to_text, get_text_to_speech
 from app.core.config import get_settings
 from app.core.observability import setup_observability
@@ -70,3 +70,4 @@ app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(sessions.router)
 app.include_router(ws.router)
+app.include_router(admin.router)

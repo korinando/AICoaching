@@ -6,6 +6,7 @@ is kept in memory between requests, so a server restart loses nothing.
 """
 
 import logging
+import random
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -31,14 +32,29 @@ class InterviewClosedError(Exception):
     """The session is no longer in progress, so it can't take answers."""
 
 
-def state_from_template(template: InterviewTemplate) -> InterviewState:
+def pick_topics(template: InterviewTemplate, rng: random.Random) -> list[str]:
+    """max_main_questions topics from the template's pool, so no two interviews are the same.
+
+    They keep the pool's order, which goes from basics to harder topics, so the interview still
+    builds up. opening_topic, when set, is always first ("Tell me about yourself").
+    """
+    count = min(template.max_main_questions, len(template.topics))
+    opening = template.opening_topic
+    rest = [topic for topic in template.topics if topic != opening]
+    picked = set(rng.sample(rest, count - 1 if opening else count))
+    return ([opening] if opening else []) + [t for t in rest if t in picked]
+
+
+def state_from_template(
+    template: InterviewTemplate, rng: random.Random | None = None
+) -> InterviewState:
     """A fresh InterviewState from a template row (like agent.templates.new_state, but from
-    the database instead of templates.json)."""
+    the database instead of templates.json). rng: tests pass a seeded one."""
     return InterviewState(
         role=template.role,
         level=template.level,
         interview_type=template.interview_type,
-        planned_topics=list(template.topics),
+        planned_topics=pick_topics(template, rng or random.Random()),
         max_main_questions=template.max_main_questions,
         max_follow_ups=template.max_follow_ups,
     )

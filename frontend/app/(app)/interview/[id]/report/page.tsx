@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 
+import { ScoreBars } from "@/components/charts";
+import { CheckIcon, SendIcon } from "@/components/icons";
 import {
   ApiError,
   getReport,
@@ -11,6 +13,7 @@ import {
   type ReportCriterion,
   requestReport,
 } from "@/lib/api";
+import { useAppData } from "@/lib/appData";
 import { useRequireLogin } from "@/lib/useRequireLogin";
 
 const POLL_MS = 3000;
@@ -22,6 +25,8 @@ const CRITERION_LABELS: Record<string, string> = {
   structure: "Structure",
   depth: "Depth",
 };
+
+const label = (name: string) => CRITERION_LABELS[name] ?? name;
 
 /** Suspense for the same reason as the interview page: the [id] is only known in the browser. */
 export default function ReportPage() {
@@ -36,6 +41,7 @@ function ReportView() {
   const ready = useRequireLogin();
   const { id } = useParams<{ id: string }>();
   const sessionId = Number(id);
+  const { sessions, refreshSessions } = useAppData();
 
   const [report, setReport] = useState<Report | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -49,6 +55,7 @@ function ReportView() {
     if (!ready) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let wasPending = false;
 
     async function poll() {
       try {
@@ -56,7 +63,12 @@ function ReportView() {
         if (stopped) return;
         setReport(latest);
         setProblem(null);
-        if (latest.status === "pending") timer = setTimeout(poll, POLL_MS);
+        if (latest.status === "pending") {
+          wasPending = true;
+          timer = setTimeout(poll, POLL_MS);
+        } else if (wasPending) {
+          void refreshSessions(); // the score appears in the sidebar too
+        }
       } catch (e) {
         if (stopped) return;
         if (e instanceof ApiError && e.status === 404) {
@@ -74,7 +86,7 @@ function ReportView() {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [ready, sessionId, attempt]);
+  }, [ready, sessionId, attempt, refreshSessions]);
 
   async function askForReport() {
     setRequesting(true);
@@ -94,28 +106,45 @@ function ReportView() {
   if (notFound) return <Note>Interview not found.</Note>;
   if (!report) return <Note>{problem ?? "Loading…"}</Note>;
 
+  const summary = sessions?.find((s) => s.id === sessionId);
+  // The score of the interview before this one, for "+0.4 since last time".
+  const previous = sessions
+    ?.filter(
+      (s) =>
+        s.overall_score !== null &&
+        summary &&
+        Date.parse(s.started_at) < Date.parse(summary.started_at),
+    )
+    .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))[0];
+
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 space-y-6 p-4">
-      <header className="flex items-center justify-between gap-4">
+    <main className="mx-auto w-full max-w-3xl space-y-8 px-4 py-8 md:px-8 md:py-10">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm text-muted">{summary?.role ?? "Interview"}</p>
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Feedback report
+          </h1>
+        </div>
         <Link
           href={`/interview/${sessionId}`}
-          className="text-sm text-zinc-500 hover:underline"
+          className="rounded-lg border border-line px-3 py-1.5 text-sm hover:bg-surface-3"
         >
-          ← Interview
-        </Link>
-        <Link
-          href="/dashboard"
-          className="text-sm text-zinc-500 hover:underline"
-        >
-          Dashboard
+          Read the transcript
         </Link>
       </header>
-      <h1 className="text-2xl font-semibold">Your feedback report</h1>
 
-      {problem && <p className="text-sm text-red-600">{problem}</p>}
+      {problem && (
+        <p role="alert" className="text-sm text-danger">
+          {problem}
+        </p>
+      )}
 
       {report.status === "ready" ? (
-        <FinishedReport report={report} />
+        <FinishedReport
+          report={report}
+          previousScore={previous?.overall_score ?? null}
+        />
       ) : (
         <Waiting
           report={report}
@@ -148,17 +177,24 @@ function Waiting({
       "This interview was too short to score: a report needs at least 3 real answers. Your answers are still saved.",
     ready: "",
   };
+  const working = report.status === "pending" && !report.can_request;
 
   return (
-    <section className="space-y-4 rounded-xl border border-zinc-200 p-6 text-center dark:border-zinc-800">
-      <p role="status" className="text-zinc-600 dark:text-zinc-300">
+    <section className="flex flex-col items-center gap-4 rounded-2xl border border-line bg-surface p-8 text-center">
+      {working && (
+        <span
+          aria-hidden
+          className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-accent motion-reduce:animate-none"
+        />
+      )}
+      <p role="status" className="max-w-md text-muted">
         {messages[report.status]}
       </p>
       {report.can_request && (
         <button
           onClick={onRequest}
           disabled={requesting}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50"
         >
           {requesting
             ? "Asking…"
@@ -171,30 +207,74 @@ function Waiting({
   );
 }
 
-function FinishedReport({ report }: { report: Report }) {
+function FinishedReport({
+  report,
+  previousScore,
+}: {
+  report: Report;
+  previousScore: number | null;
+}) {
+  const overall = report.overall_score ?? 0;
+  const change = previousScore === null ? null : overall - previousScore;
+
   return (
     <>
-      <section className="rounded-xl bg-zinc-100 p-6 dark:bg-zinc-800">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Overall score
-        </p>
-        <p className="text-4xl font-semibold">
-          {report.overall_score?.toFixed(1)}
-          <span className="text-lg font-normal text-zinc-500 dark:text-zinc-400">
-            {" "}
-            out of {MAX_SCORE}
-          </span>
-        </p>
+      <section className="grid gap-6 rounded-2xl border border-line bg-surface p-6 md:grid-cols-[auto_1fr] md:gap-10">
+        <div className="flex flex-col justify-center">
+          <p className="text-sm text-muted">Overall score</p>
+          <p className="text-6xl font-semibold tracking-tight">
+            {overall.toFixed(1)}
+            <span className="text-xl font-normal text-muted">
+              {" "}
+              / {MAX_SCORE}
+            </span>
+          </p>
+          {change !== null && Math.abs(change) >= 0.05 && (
+            <p
+              className={`mt-1 text-sm font-medium ${change > 0 ? "text-success" : "text-danger"}`}
+            >
+              {change > 0 ? "▲" : "▼"} {Math.abs(change).toFixed(1)} since your
+              last interview
+            </p>
+          )}
+          <p className="mt-2 max-w-48 text-xs text-muted">
+            The average of the 4 criteria
+          </p>
+        </div>
+        <div>
+          <h2 className="mb-2 text-sm font-medium text-muted">
+            Score per criterion
+          </h2>
+          <ScoreBars
+            bars={report.criteria.map((c) => ({
+              label: label(c.name),
+              score: c.score,
+            }))}
+          />
+        </div>
       </section>
 
-      {report.criteria.map((criterion) => (
-        <Criterion key={criterion.name} criterion={criterion} />
-      ))}
+      <div className="grid gap-4 md:grid-cols-2">
+        <FeedbackList
+          title="What went well"
+          items={report.strengths}
+          icon={<CheckIcon className="h-4 w-4 text-success" />}
+        />
+        <FeedbackList
+          title="What to work on"
+          items={report.improvements}
+          icon={<SendIcon className="h-4 w-4 rotate-45 text-accent" />}
+        />
+      </div>
 
-      <FeedbackList title="What went well" items={report.strengths} />
-      <FeedbackList title="What to work on" items={report.improvements} />
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">In detail</h2>
+        {report.criteria.map((criterion) => (
+          <Criterion key={criterion.name} criterion={criterion} />
+        ))}
+      </section>
 
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-muted">
         Written by AI, so treat it as an opinion and not a final measure. Your
         recordings were listened to again for this report, so its wording can
         differ from the transcript in your interview.
@@ -205,23 +285,46 @@ function FinishedReport({ report }: { report: Report }) {
 
 function Criterion({ criterion }: { criterion: ReportCriterion }) {
   return (
-    <section className="space-y-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+    <article className="space-y-3 rounded-2xl border border-line bg-surface p-5">
       <div className="flex items-center justify-between gap-4">
-        <h2 className="font-semibold">
-          {CRITERION_LABELS[criterion.name] ?? criterion.name}
-        </h2>
-        <ScoreDots score={criterion.score} />
+        <h3 className="font-semibold">{label(criterion.name)}</h3>
+        <span className="rounded-lg bg-accent-soft px-2 py-0.5 text-sm font-semibold tabular-nums text-accent">
+          {criterion.score}
+          <span className="font-normal"> / {MAX_SCORE}</span>
+        </span>
       </div>
-      <p className="text-zinc-700 dark:text-zinc-300">
-        {criterion.explanation}
-      </p>
-      <ul className="space-y-2 border-l-2 border-zinc-200 pl-4 dark:border-zinc-700">
+      <p className="leading-relaxed">{criterion.explanation}</p>
+      <ul className="space-y-2">
         {criterion.examples.map((example) => (
           <li
             key={example}
-            className="text-sm text-zinc-600 dark:text-zinc-400"
+            className="border-l-2 border-accent/40 pl-3 text-sm text-muted"
           >
             {example}
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
+function FeedbackList({
+  title,
+  items,
+  icon,
+}: {
+  title: string;
+  items: string[];
+  icon: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3 rounded-2xl border border-line bg-surface p-5">
+      <h2 className="font-semibold">{title}</h2>
+      <ul className="space-y-2.5">
+        {items.map((item) => (
+          <li key={item} className="flex gap-2.5 text-sm leading-relaxed">
+            <span className="mt-0.5 shrink-0">{icon}</span>
+            <span>{item}</span>
           </li>
         ))}
       </ul>
@@ -229,42 +332,6 @@ function Criterion({ criterion }: { criterion: ReportCriterion }) {
   );
 }
 
-function ScoreDots({ score }: { score: number }) {
-  return (
-    <div className="flex shrink-0 items-center gap-2">
-      <div aria-hidden className="flex gap-1">
-        {Array.from({ length: MAX_SCORE }, (_, index) => (
-          <span
-            key={index}
-            className={`h-2.5 w-2.5 rounded-full ${
-              index < score
-                ? "bg-zinc-900 dark:bg-zinc-100"
-                : "bg-zinc-200 dark:bg-zinc-700"
-            }`}
-          />
-        ))}
-      </div>
-      <span className="text-sm font-medium">
-        {score}
-        <span className="sr-only"> out of {MAX_SCORE}</span>
-      </span>
-    </div>
-  );
-}
-
-function FeedbackList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section className="space-y-2">
-      <h2 className="font-semibold">{title}</h2>
-      <ul className="list-disc space-y-1 pl-5 text-zinc-700 dark:text-zinc-300">
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className="p-6 text-zinc-500">{children}</p>;
+  return <p className="p-6 text-muted">{children}</p>;
 }

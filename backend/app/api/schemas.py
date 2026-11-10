@@ -39,7 +39,8 @@ class TemplateOut(BaseModel):
     role: str
     level: str
     interview_type: str
-    topics: list[str]
+    summary: str
+    topics: list[str]  # the whole pool; each interview asks max_main_questions of them
     max_main_questions: int
 
 
@@ -117,3 +118,34 @@ class UserOut(BaseModel):
     email: str
     name: str
     created_at: datetime
+    # Only decides whether the page shows the debug button. The /admin endpoints check again
+    # on the server, so changing this in the browser opens nothing.
+    is_admin: bool = False
+
+
+class TurnTimingOut(BaseModel):
+    """How long each part of one reply took, in milliseconds. None: not measured for that turn."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    turn_index: int
+    speaker: str
+    stt_ms: int | None
+    llm_ms: int | None
+    tts_ms: int | None
+    total_latency_ms: int | None
+    first_audio_ms: int | None
+
+
+class DebugInfoOut(BaseModel):
+    """What the admin debug panel shows about the server. Never a secret."""
+
+    commit: str | None
+    llm_model: str
+    whisper_model: str
+    scoring_whisper_model: str
+    piper_voice: str
+    daily_session_limit: int
+    database: str  # "ok" or "unavailable"
+    redis: str
+    queued_reports: int | None  # None when Redis can't be reached

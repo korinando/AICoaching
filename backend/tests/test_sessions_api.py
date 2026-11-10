@@ -28,6 +28,7 @@ def test_list_templates(client, template):
     [only] = response.json()
     assert only["slug"] == "junior_backend"
     assert only["topics"][0] == "REST APIs"
+    assert only["summary"] == template.summary  # shown in the "New interview" picker
 
 
 # --- POST /sessions ----------------------------------------------------------------------------

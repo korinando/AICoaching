@@ -14,11 +14,15 @@ class InterviewTemplate(BaseModel):
 
     Rule: the interviewer asks one main question per topic. The interview ends
     when topics run out or max_main_questions is reached, whichever comes first.
+    topics is a pool: the web app picks max_main_questions of them at random for each interview
+    (services/interviews.py), always starting with opening_topic when there is one.
     """
 
     role: str
     level: str
     interview_type: str
+    summary: str = ""  # one sentence for the "New interview" picker
+    opening_topic: str | None = None
     topics: list[str] = Field(min_length=1)
     max_main_questions: int = Field(ge=1)
     max_follow_ups: int = 2

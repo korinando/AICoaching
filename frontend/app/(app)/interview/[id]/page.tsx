@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 
+import { Logo, ReportIcon, SendIcon, SpeakerIcon } from "@/components/icons";
+import { useOpenNewInterview } from "@/components/NewInterview";
 import { TalkButton } from "@/components/TalkButton";
 import {
   ApiError,
@@ -18,6 +20,7 @@ import {
   type Session,
   type Turn,
 } from "@/lib/api";
+import { useAppData } from "@/lib/appData";
 import { useAudioQueue } from "@/lib/useAudioQueue";
 import { useInterviewSocket } from "@/lib/useInterviewSocket";
 import type { Recording } from "@/lib/useRecorder";
@@ -57,6 +60,8 @@ function Interview() {
   const firstAudioRef = useRef<Promise<number | null> | null>(null);
   const { play, stop } = useTurnAudio();
   const queue = useAudioQueue();
+  const { sessions, refreshSessions } = useAppData();
+  const openNewInterview = useOpenNewInterview();
 
   const busy = pending !== null || uploading || finishing;
   const { send: sendToSocket, lost } = useInterviewSocket(
@@ -125,6 +130,7 @@ function Interview() {
         break;
       case "session_ended":
         setSession((s) => s && { ...s, status: message.status });
+        void refreshSessions(); // the sidebar shows it as finished, then scoring
         break;
       case "answer_in_progress":
         // The server did get it, so the copy in the box must not be sent a second time.
@@ -244,31 +250,48 @@ function Interview() {
   if (!session) return <Message text="Loading…" />;
 
   const finished = session.status !== "in_progress";
+  const role = sessions?.find((s) => s.id === sessionId)?.role ?? "Interview";
+  const answers = session.turns.filter((t) => t.speaker === "candidate").length;
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col p-4">
-      <header className="mb-4 flex items-center justify-between">
-        <Link
-          href="/dashboard"
-          className="text-sm text-zinc-500 hover:underline"
-        >
-          ← Dashboard
-        </Link>
+    <main className="flex min-h-full flex-col">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-line bg-background/90 px-4 py-3 backdrop-blur md:px-6">
+        <div className="min-w-0">
+          <h1 className="truncate font-semibold">{role}</h1>
+          <p className="text-xs text-muted">
+            {finished ? (
+              "Finished"
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                In progress
+              </span>
+            )}
+            {" · "}
+            {answers} {answers === 1 ? "answer" : "answers"}
+          </p>
+        </div>
         {finished ? (
-          <span className="text-sm text-zinc-500">Finished</span>
+          <Link
+            href={`/interview/${sessionId}/report`}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+          >
+            <ReportIcon className="h-4 w-4" />
+            View report
+          </Link>
         ) : (
           <button
             type="button"
             onClick={endInterview}
             disabled={busy || lost}
-            className="text-sm text-red-600 hover:underline disabled:opacity-50"
+            className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-sm text-muted hover:border-danger hover:text-danger disabled:opacity-50"
           >
             End interview
           </button>
         )}
       </header>
 
-      <ol className="flex-1 space-y-3">
+      <ol className="mx-auto w-full max-w-3xl flex-1 space-y-6 px-4 py-6 md:px-6">
         {session.turns.map((turn) => (
           <Bubble
             key={turn.turn_index}
@@ -289,69 +312,100 @@ function Interview() {
             {reply ? (
               <Bubble turn={{ speaker: "interviewer", text: reply }} />
             ) : (
-              <li className="text-sm text-zinc-500">
-                Interviewer is thinking…
-              </li>
+              <Thinking />
             )}
           </>
+        )}
+        {uploading && pending === null && (
+          <li className="flex justify-end">
+            <p className="rounded-2xl bg-accent-soft px-4 py-2 text-sm text-accent">
+              Listening to your answer…
+            </p>
+          </li>
         )}
       </ol>
       <div ref={bottomRef} />
 
-      {finishing && (
-        <p className="mt-2 text-sm text-zinc-500">
-          Finishing your last answer…
-        </p>
-      )}
-      {lost && !finished && (
-        <p className="mt-2 text-sm text-amber-600">
-          Connection lost. Reconnecting…
-        </p>
-      )}
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-
-      {finished ? (
-        <p className="mt-4 rounded-lg bg-zinc-100 p-4 text-center text-sm dark:bg-zinc-800">
-          The interview is over.{" "}
-          <Link href={`/interview/${sessionId}/report`} className="underline">
-            See your report
-          </Link>{" "}
-          or{" "}
-          <Link href="/dashboard" className="underline">
-            start another one
-          </Link>
-        </p>
-      ) : (
-        <div className="sticky bottom-0 mt-4 space-y-2 bg-background py-2">
-          <TalkButton
-            onRecorded={sendRecording}
-            onPress={prepareToAnswer} // don't record the interviewer's voice through the speakers
-            disabled={busy || lost}
-          />
-          {uploading && (
-            <p className="text-sm text-zinc-500">Listening to your answer…</p>
+      <div className="sticky bottom-0 bg-gradient-to-t from-background from-70% to-transparent px-4 pb-4 pt-6 md:px-6">
+        <div className="mx-auto w-full max-w-3xl space-y-2">
+          {finishing && (
+            <p className="text-sm text-muted">Finishing your last answer…</p>
           )}
-          <div className="flex gap-2">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={onKeyDown}
-              disabled={busy}
-              maxLength={4000}
-              rows={3}
-              placeholder="Type your answer… (Enter to send, Shift+Enter for a new line)"
-              className="flex-1 resize-none rounded-md border border-zinc-300 bg-transparent px-3 py-2 outline-none focus:border-zinc-500 dark:border-zinc-700"
-            />
-            <button
-              onClick={send}
-              disabled={busy || lost}
-              className="self-end rounded-md bg-zinc-900 px-4 py-2 font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-            >
-              Send
-            </button>
-          </div>
+          {lost && !finished && (
+            <p className="text-sm text-amber-600 dark:text-amber-400">
+              Connection lost. Reconnecting…
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="text-sm text-danger">
+              {error}
+            </p>
+          )}
+
+          {finished ? (
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-line bg-surface p-5 text-center sm:flex-row sm:justify-between sm:text-left">
+              <p className="text-sm">
+                <span className="font-medium">The interview is over.</span>{" "}
+                <span className="text-muted">
+                  Your report is ready a minute or two after it ends.
+                </span>
+              </p>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={openNewInterview}
+                  className="rounded-lg border border-line px-3 py-1.5 text-sm hover:bg-surface-3"
+                >
+                  New interview
+                </button>
+                <Link
+                  href={`/interview/${sessionId}/report`}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover"
+                >
+                  See your report
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-line bg-surface shadow-sm focus-within:border-accent">
+              <label htmlFor="answer" className="sr-only">
+                Your answer
+              </label>
+              <textarea
+                id="answer"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKeyDown}
+                disabled={busy}
+                maxLength={4000}
+                rows={2}
+                placeholder="Hold the mic to answer out loud, or type here…"
+                className="block w-full resize-none bg-transparent px-4 pt-3 outline-none placeholder:text-muted disabled:opacity-60"
+              />
+              <div className="flex items-center justify-between gap-2 px-2 pb-2">
+                <p className="hidden pl-2 text-xs text-muted sm:block">
+                  Enter to send · Shift+Enter for a new line
+                </p>
+                <div className="ml-auto flex items-center gap-2">
+                  <TalkButton
+                    onRecorded={sendRecording}
+                    onPress={prepareToAnswer} // don't record the interviewer's voice through the speakers
+                    disabled={busy || lost}
+                  />
+                  <button
+                    onClick={send}
+                    disabled={busy || lost || draft.trim() === ""}
+                    aria-label="Send typed answer"
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-foreground text-background hover:opacity-80 disabled:opacity-30"
+                  >
+                    <SendIcon className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </main>
   );
 }
@@ -365,32 +419,66 @@ function Bubble({
   faded?: boolean;
   onPlay?: () => void;
 }) {
-  const mine = turn.speaker === "candidate";
-  return (
-    <li className={`flex items-center gap-1 ${mine ? "flex-row-reverse" : ""}`}>
-      <p
-        className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 ${
-          mine
-            ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-            : "bg-zinc-100 dark:bg-zinc-800"
-        } ${faded ? "opacity-60" : ""}`}
-      >
-        {turn.text}
-      </p>
-      {onPlay && (
-        <button
-          type="button"
-          onClick={onPlay}
-          aria-label="Play this message"
-          className="rounded p-1 text-sm opacity-60 hover:opacity-100"
+  if (turn.speaker === "candidate") {
+    return (
+      <li className="flex justify-end">
+        <p
+          className={`max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-accent-soft px-4 py-2.5 ${
+            faded ? "opacity-60" : ""
+          }`}
         >
-          🔊
-        </button>
-      )}
+          {turn.text}
+        </p>
+      </li>
+    );
+  }
+  return (
+    <li className="group flex gap-3">
+      <InterviewerAvatar />
+      <div className="min-w-0 flex-1 space-y-1 pt-1">
+        <p className="whitespace-pre-wrap leading-relaxed">{turn.text}</p>
+        {onPlay && (
+          <button
+            type="button"
+            onClick={onPlay}
+            aria-label="Play this message again"
+            title="Play again"
+            className="-ml-1.5 rounded-md p-1.5 text-muted opacity-70 hover:bg-surface-3 hover:text-foreground group-hover:opacity-100"
+          >
+            <SpeakerIcon className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function InterviewerAvatar() {
+  return (
+    <span aria-hidden className="mt-0.5 shrink-0">
+      <Logo className="h-8 w-8" />
+    </span>
+  );
+}
+
+function Thinking() {
+  return (
+    <li className="flex items-center gap-3" aria-live="polite">
+      <InterviewerAvatar />
+      <span className="sr-only">The interviewer is thinking</span>
+      <span aria-hidden className="flex gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="thinking-dot h-2 w-2 rounded-full bg-muted"
+            style={{ animationDelay: `${i * 0.15}s` }}
+          />
+        ))}
+      </span>
     </li>
   );
 }
 
 function Message({ text }: { text: string }) {
-  return <p className="p-6 text-zinc-500">{text}</p>;
+  return <p className="p-6 text-muted">{text}</p>;
 }

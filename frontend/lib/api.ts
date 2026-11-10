@@ -11,6 +11,7 @@ export type User = {
   email: string;
   name: string;
   created_at: string;
+  is_admin: boolean; // shows the debug button; the /admin endpoints check again on the server
 };
 
 export type Template = {
@@ -19,7 +20,8 @@ export type Template = {
   role: string;
   level: string;
   interview_type: string;
-  topics: string[];
+  summary: string; // one sentence for the "New interview" picker
+  topics: string[]; // the pool: each interview asks max_main_questions of them
   max_main_questions: number;
 };
 
@@ -49,6 +51,30 @@ export type SessionSummary = {
   started_at: string;
   report_status: Report["status"];
   overall_score: number | null;
+};
+
+/** The admin debug panel: what the server runs and whether its parts answer. */
+export type DebugInfo = {
+  commit: string | null; // null when not running on Railway
+  llm_model: string;
+  whisper_model: string;
+  scoring_whisper_model: string;
+  piper_voice: string;
+  daily_session_limit: number;
+  database: "ok" | "unavailable";
+  redis: "ok" | "unavailable";
+  queued_reports: number | null;
+};
+
+/** Milliseconds for each part of one turn; null where it wasn't measured. */
+export type TurnTiming = {
+  turn_index: number;
+  speaker: Turn["speaker"];
+  stt_ms: number | null;
+  llm_ms: number | null;
+  tts_ms: number | null;
+  total_latency_ms: number | null;
+  first_audio_ms: number | null;
 };
 
 export type ReportCriterion = {
@@ -206,6 +232,11 @@ export async function register(
 }
 
 export const getMe = () => apiFetch<User>("/auth/me");
+
+export const getDebugInfo = () => apiFetch<DebugInfo>("/admin/debug");
+
+export const getSessionTimings = (id: number) =>
+  apiFetch<TurnTiming[]>(`/admin/sessions/${id}/timings`);
 
 export const listTemplates = () => apiFetch<Template[]>("/templates");
 

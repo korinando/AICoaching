@@ -1,13 +1,16 @@
 """The agent running on top of the database (Step 5), with a scripted fake LLM."""
 
+import random
+
 import pytest
 from sqlalchemy import select
 
 from app.agent.interviewer import CLOSING_TEXT, REPEAT_TEXT, Interviewer
-from app.models import InterviewSession
+from app.models import InterviewSession, InterviewTemplate
 from app.services.interviews import (
     InterviewClosedError,
     load_state,
+    pick_topics,
     save_answer,
     start_interview,
     state_from_template,
@@ -31,9 +34,57 @@ def answer(db, session: InterviewSession, text: str, interviewer: Interviewer) -
 
 def test_state_from_template_copies_settings(template):
     state = state_from_template(template)
+    # A pool exactly as big as the interview: every topic, in order.
     assert state.planned_topics == template.topics
     assert state.max_main_questions == 5
     assert state.history == []
+
+
+POOL = [f"Topic {n}" for n in range(1, 13)]
+
+
+def pool_template(opening: str | None = None) -> InterviewTemplate:
+    return InterviewTemplate(
+        slug="pool",
+        role="Junior Backend Developer",
+        level="junior",
+        interview_type="technical",
+        summary="",
+        opening_topic=opening,
+        topics=POOL,
+        max_main_questions=5,
+        max_follow_ups=2,
+    )
+
+
+def test_picks_5_topics_from_the_pool_in_pool_order():
+    for seed in range(20):
+        topics = pick_topics(pool_template(), random.Random(seed))
+        assert len(topics) == 5
+        assert len(set(topics)) == 5  # no topic twice
+        assert topics == sorted(topics, key=POOL.index)  # basics first, as in the pool
+
+
+def test_different_interviews_get_different_topics():
+    picks = {tuple(pick_topics(pool_template(), random.Random(seed))) for seed in range(20)}
+    assert len(picks) > 10
+
+
+def test_the_opening_topic_always_comes_first():
+    for seed in range(20):
+        topics = pick_topics(pool_template(opening="Topic 7"), random.Random(seed))
+        assert topics[0] == "Topic 7"
+        assert topics.count("Topic 7") == 1
+        assert len(topics) == 5
+
+
+def test_the_picked_topics_are_saved_with_the_interview(db, user, template):
+    """The pick happens once, at the start: the saved state is what the interviewer follows."""
+    template.topics = POOL
+    session = start_interview(db, user, template, Interviewer(FakeLLMClient(opening())))
+    planned = load_state(session).planned_topics
+    assert len(planned) == 5
+    assert set(planned) <= set(POOL)
 
 
 def test_start_saves_session_state_and_first_turn(db, user, template):

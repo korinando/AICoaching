@@ -6,7 +6,14 @@ const nextConfig: NextConfig = {
   // Docker image (Week 7). `npm run dev` and `npm start` are unchanged.
   output: "standalone",
   cacheComponents: true,
+  // Next's own "N" badge, in development only. Admins get the app's debug button instead
+  // (components/DebugButton.tsx), which also works on the deployed site.
+  devIndicators: false,
   partialPrefetching: true,
+  // The home page used to be /dashboard: old links and bookmarks still land on it.
+  async redirects() {
+    return [{ source: "/dashboard", destination: "/", permanent: false }];
+  },
   turbopack: {
     rules: {
       "*.css": {

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DB, CurrentUser
+from app.api.deps import DB, CurrentUser, SettingsDep
 from app.api.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenPair, UserOut
 from app.core.rate_limit import (
     LOGIN_PER_EMAIL,
@@ -84,6 +84,9 @@ def refresh(body: RefreshRequest, db: DB) -> TokenPair:
 
 
 @router.get("/me")
-def me(user: CurrentUser) -> UserOut:
-    """Who am I? The frontend calls this to check the login is still valid."""
-    return UserOut.model_validate(user)
+def me(user: CurrentUser, settings: SettingsDep) -> UserOut:
+    """Who am I? The frontend calls this to check the login is still valid, and to know whether
+    to show the admin debug button."""
+    out = UserOut.model_validate(user)
+    out.is_admin = settings.is_admin(user.email)
+    return out

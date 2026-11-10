@@ -73,6 +73,19 @@ class FakeQueue:
             raise self.error
         self.jobs.append((job, *args))
 
+    @property
+    def count(self) -> int:
+        return len(self.jobs)
+
+    @property
+    def connection(self) -> "FakeQueue":
+        return self  # so queue.connection.ping() works, and fails along with enqueue
+
+    def ping(self) -> bool:
+        if self.error:
+            raise self.error
+        return True
+
 
 class FakeTextToSpeech:
     """TextToSpeech for tests: "speaks" by returning the text as bytes, or fails on demand."""

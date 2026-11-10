@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
+import { Logo } from "@/components/icons";
 import { login, register } from "@/lib/api";
 
 export default function LoginPage() {
@@ -21,7 +22,7 @@ export default function LoginPage() {
     try {
       if (mode === "login") await login(email, password);
       else await register(email, password, name);
-      router.push("/dashboard");
+      router.push("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
       setBusy(false);
@@ -31,16 +32,32 @@ export default function LoginPage() {
   const isRegister = mode === "register";
 
   return (
-    <main className="flex flex-1 items-center justify-center p-4">
+    <main className="flex flex-1 flex-col items-center justify-center gap-6 p-4">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <Logo className="h-11 w-11" />
+        <div>
+          <p className="text-2xl font-semibold tracking-tight">Offerward</p>
+          <p className="text-sm text-muted">
+            Practise job interviews out loud, with feedback
+          </p>
+        </div>
+      </div>
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-4 rounded-xl border border-zinc-200 p-6 shadow-sm dark:border-zinc-800"
+        className="w-full max-w-sm space-y-4 rounded-2xl border border-line bg-surface p-6 shadow-sm"
       >
-        <h1 className="text-xl font-semibold">{isRegister ? "Create an account" : "Log in"}</h1>
+        <h1 className="text-lg font-semibold">
+          {isRegister ? "Create an account" : "Log in"}
+        </h1>
 
         {isRegister && (
           <Field label="Name">
-            <input required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={inputClass}
+            />
           </Field>
         )}
         <Field label="Email">
@@ -65,7 +82,11 @@ export default function LoginPage() {
           />
         </Field>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
 
         <button type="submit" disabled={busy} className={buttonClass}>
           {busy ? "Please wait…" : isRegister ? "Create account" : "Log in"}
@@ -77,16 +98,24 @@ export default function LoginPage() {
             setMode(isRegister ? "login" : "register");
             setError(null);
           }}
-          className="w-full text-sm text-zinc-500 hover:underline"
+          className="w-full text-sm text-muted hover:text-foreground hover:underline"
         >
-          {isRegister ? "Already have an account? Log in" : "No account yet? Create one"}
+          {isRegister
+            ? "Already have an account? Log in"
+            : "No account yet? Create one"}
         </button>
       </form>
     </main>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="block space-y-1">
       <span className="text-sm font-medium">{label}</span>
@@ -96,6 +125,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-transparent px-3 py-2 outline-none focus:border-zinc-500 dark:border-zinc-700";
+  "w-full rounded-lg border border-line bg-transparent px-3 py-2 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20";
 const buttonClass =
-  "w-full rounded-md bg-zinc-900 px-3 py-2 font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900";
+  "w-full rounded-lg bg-accent px-3 py-2.5 font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50";

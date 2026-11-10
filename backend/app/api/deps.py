@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.interviewer import Interviewer
 from app.agent.llm_client import GeminiLLMClient
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.core.security import TokenError, decode_token
 from app.models import User
@@ -27,6 +27,8 @@ VOICES_DIR = Path(__file__).resolve().parents[2] / "voices"  # backend/voices
 _bearer = HTTPBearer(auto_error=False)
 
 DB = Annotated[Session, Depends(get_db)]
+# As a dependency (and not get_settings() called inside), so a test can swap in other settings.
+SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
 def get_current_user(
@@ -52,6 +54,17 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_admin_user(user: CurrentUser, settings: SettingsDep) -> User:
+    """The logged-in user, if their email is in ADMIN_EMAILS. Logged in but not an admin -> 403:
+    we know who they are (not 401), they just aren't allowed."""
+    if not settings.is_admin(user.email):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins only")
+    return user
+
+
+AdminUser = Annotated[User, Depends(get_admin_user)]
 
 
 @lru_cache

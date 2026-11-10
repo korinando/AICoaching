@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     # The header in which a trusted proxy puts the visitor's real address. Empty: there's no
     # proxy, use the connection's address. On Railway: X-Real-IP.
     proxy_ip_header: str = ""
+    # Accounts that may see the debug panel and call /admin/*. JSON, like CORS_ORIGINS:
+    # ADMIN_EMAILS='["me@example.com"]'. Empty: nobody is an admin.
+    admin_emails: list[str] = []
+
+    def is_admin(self, email: str) -> bool:
+        """Emails are compared without case: Me@x.com and me@x.com are the same inbox."""
+        return email.lower() in {e.lower() for e in self.admin_emails}
 
 
 @lru_cache

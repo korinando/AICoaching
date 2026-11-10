@@ -3,35 +3,106 @@
     "role": "Junior Backend Developer",
     "level": "junior",
     "interview_type": "technical",
-    "topics": ["REST APIs", "Databases", "Git", "Debugging", "Teamwork"],
+    "summary": "How web services work behind the scenes: designing APIs, storing data, and keeping code reliable and secure.",
+    "topics": [
+      "REST APIs",
+      "Databases",
+      "HTTP methods and status codes",
+      "Database indexes and performance",
+      "Authentication and authorization",
+      "Git",
+      "Testing",
+      "Debugging",
+      "Caching",
+      "Async code and concurrency",
+      "Docker and deployment",
+      "Web security basics"
+    ],
     "max_main_questions": 5
   },
-  "junior_frontend":{
-        "role": "Junior Frontend Developer",
-        "level": "junior",
-        "interview_type": "technical",
-        "topics": ["HTML/CSS","JavaScript","React","Browser debugging", "Teamwork"],
-        "max_main_questions": 5
-      },
+  "junior_frontend": {
+    "role": "Junior Frontend Developer",
+    "level": "junior",
+    "interview_type": "technical",
+    "summary": "Building the interfaces people use: layout, JavaScript, React, and making pages fast and accessible.",
+    "topics": [
+      "HTML/CSS",
+      "Responsive design",
+      "JavaScript",
+      "Promises and async JavaScript",
+      "The DOM and events",
+      "React",
+      "State management",
+      "TypeScript",
+      "Browser debugging",
+      "Web performance",
+      "Accessibility",
+      "Frontend testing"
+    ],
+    "max_main_questions": 5
+  },
   "junior_ai_engineer": {
     "role": "Junior AI Engineer",
     "level": "junior",
     "interview_type": "technical",
-    "topics": ["Machine learning basics", "LLMs and prompting", "RAG and embeddings", "Evaluating AI systems", "Teamwork"],
+    "summary": "From machine learning basics to building with LLMs: prompting, retrieval, and telling whether an AI system really works.",
+    "topics": [
+      "Machine learning basics",
+      "Overfitting and evaluation metrics",
+      "Neural networks",
+      "Python for data and ML",
+      "LLMs and prompting",
+      "Embeddings and vector search",
+      "RAG",
+      "Fine-tuning versus prompting",
+      "Evaluating AI systems",
+      "Hallucinations and AI safety",
+      "Using AI APIs in an application",
+      "Cost and latency of AI features"
+    ],
     "max_main_questions": 5
   },
-    "junior_data_analyst": {
+  "junior_data_analyst": {
     "role": "Junior Data Analyst",
     "level": "junior",
     "interview_type": "technical",
-    "topics": ["SQL", "Data cleaning", "Statistics basics", "Data visualization", "Communicating findings"],
+    "summary": "Turning raw data into answers: SQL, cleaning messy data, statistics, and explaining what you found to others.",
+    "topics": [
+      "SQL",
+      "Joins and aggregations",
+      "Data cleaning",
+      "Spreadsheets",
+      "Statistics basics",
+      "A/B testing",
+      "Python or R for analysis",
+      "Data visualization",
+      "Dashboards and BI tools",
+      "Metrics and KPIs",
+      "Data quality",
+      "Communicating findings"
+    ],
     "max_main_questions": 5
   },
   "junior_behavioral": {
     "role": "Junior Developer",
     "level": "junior",
     "interview_type": "behavioral",
-    "topics": ["Tell me about yourself", "Teamwork and conflict", "A mistake you made", "Working under pressure", "Why this role"],
+    "summary": "The culture-fit round: your story, how you work with others, and how you handle pressure, feedback and mistakes.",
+    "opening_topic": "Tell me about yourself",
+    "topics": [
+      "Tell me about yourself",
+      "Teamwork and conflict",
+      "A mistake you made",
+      "Working under pressure",
+      "Receiving feedback",
+      "A project you are proud of",
+      "Learning something new quickly",
+      "Disagreeing with a decision",
+      "Handling unclear requirements",
+      "Prioritising your work",
+      "Strengths and weaknesses",
+      "Why this role"
+    ],
     "max_main_questions": 5
   }
 }
