@@ -16,7 +16,12 @@ from app.core.db import get_db
 from app.core.security import TokenError, decode_token
 from app.models import User
 from app.speech.storage import AudioStorage, S3AudioStorage
-from app.speech.stt import SpeechToText, WhisperSpeechToText
+from app.speech.stt import (
+    FallbackSpeechToText,
+    GroqSpeechToText,
+    SpeechToText,
+    WhisperSpeechToText,
+)
 from app.speech.tts import PiperTextToSpeech, TextToSpeech
 from app.workers.queue import get_queue
 
@@ -102,8 +107,17 @@ AudioStorageDep = Annotated[AudioStorage, Depends(get_audio_storage)]
 
 @lru_cache
 def get_speech_to_text() -> SpeechToText:
-    """One Whisper model for the whole server: loading it takes seconds. Tests use a fake."""
-    return WhisperSpeechToText(get_settings().whisper_model)
+    """One for the whole server: loading the local model takes seconds. Tests use a fake.
+
+    With a Groq key: Groq first, the local model if Groq fails. Without: the local model only."""
+    settings = get_settings()
+    local = WhisperSpeechToText(
+        settings.whisper_model, settings.whisper_device, settings.whisper_compute_type
+    )
+    groq_key = settings.groq_api_key.get_secret_value()
+    if not groq_key:
+        return local
+    return FallbackSpeechToText(GroqSpeechToText(groq_key, settings.groq_stt_model), local)
 
 
 SpeechToTextDep = Annotated[SpeechToText, Depends(get_speech_to_text)]

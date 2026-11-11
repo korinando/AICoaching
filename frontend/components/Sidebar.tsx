@@ -83,24 +83,22 @@ export function Sidebar({
               Your interviews will appear here.
             </p>
           ) : (
-            groupByDay(sessions).map(([label, group]) => (
-              <section key={label} className="pt-4">
-                <h2 className="px-2 pb-1 text-xs font-medium text-muted">
-                  {label}
-                </h2>
-                <ul className="space-y-0.5">
-                  {group.map((session) => (
-                    <li key={session.id}>
-                      <SessionLink
-                        session={session}
-                        active={pathname.startsWith(`/interview/${session.id}`)}
-                        onClick={onClose}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))
+            <>
+              <h2 className="px-2 pb-1 pt-4 text-xs font-medium text-muted">
+                History
+              </h2>
+              <ul className="space-y-0.5">
+                {newestFirst(sessions).map((session) => (
+                  <li key={session.id}>
+                    <SessionLink
+                      session={session}
+                      active={pathname.startsWith(`/interview/${session.id}`)}
+                      onClick={onClose}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </nav>
 
@@ -161,7 +159,12 @@ function SessionLink({
         active ? "bg-surface-3 font-medium" : "hover:bg-surface-3"
       }`}
     >
-      <span className="truncate">{session.role}</span>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="truncate">{session.role}</span>
+        <span className="shrink-0 text-xs font-normal text-muted">
+          {startedLabel(session.started_at)}
+        </span>
+      </span>
       <Badge session={session} />
     </Link>
   );
@@ -199,30 +202,26 @@ function SkeletonList() {
   );
 }
 
-/** Today, Yesterday, Previous 7 days, then one group per month: like a chat app's history. */
-function groupByDay(sessions: SessionSummary[]): [string, SessionSummary[]][] {
+function newestFirst(sessions: SessionSummary[]): SessionSummary[] {
+  return [...sessions].sort(
+    (a, b) => Date.parse(b.started_at) - Date.parse(a.started_at),
+  );
+}
+
+/** When the interview began: "Today", "Yesterday", then the date ("Nov 3"; with the year once
+ * it's from another year). Compared by calendar day, so 23:50 yesterday is "Yesterday". */
+function startedLabel(startedAt: string): string {
+  const started = new Date(startedAt);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const day = 24 * 60 * 60 * 1000;
-  const groups = new Map<string, SessionSummary[]>();
-  const newestFirst = [...sessions].sort(
-    (a, b) => Date.parse(b.started_at) - Date.parse(a.started_at),
-  );
-  for (const session of newestFirst) {
-    const started = new Date(session.started_at);
-    const age = startOfToday.getTime() - started.getTime();
-    const label =
-      age <= 0
-        ? "Today"
-        : age <= day
-          ? "Yesterday"
-          : age <= 7 * day
-            ? "Previous 7 days"
-            : started.toLocaleDateString(undefined, {
-                month: "long",
-                year: "numeric",
-              });
-    groups.set(label, [...(groups.get(label) ?? []), session]);
-  }
-  return [...groups];
+  if (started.getTime() >= startOfToday.getTime()) return "Today";
+  if (started.getTime() >= startOfToday.getTime() - day) return "Yesterday";
+  return started.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(started.getFullYear() !== startOfToday.getFullYear() && {
+      year: "numeric",
+    }),
+  });
 }

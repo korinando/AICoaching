@@ -9,6 +9,9 @@ x-backend-env: &backend-env
   # error here, and checking certificates must stay on.
   WHISPER_MODELS_DIR: /models
   HF_HUB_OFFLINE: "1"
+  # No GPU in Docker: whatever backend/.env says for my laptop, run the small model on the CPU here.
+  WHISPER_DEVICE: cpu
+  WHISPER_MODEL: base.en
 
 services:
   db:

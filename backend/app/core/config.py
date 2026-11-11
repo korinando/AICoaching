@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     # base.en: English only, about 140 MB. Bigger (small.en) is more accurate but slower.
     whisper_model: str = "base.en"
+    # "cuda": run whisper_model on an NVIDIA GPU (my laptop: turbo answers in about 1 s instead of
+    # 16 s). Falls back to the CPU if the GPU can't be used. Railway and Docker have no GPU: "cpu".
+    whisper_device: str = "cpu"
+    # On a GPU: int8_float16 (8-bit weights, half the memory, the same text in my tests). On a
+    # CPU, int8 is always used.
+    whisper_compute_type: str = "int8_float16"
+    # Live answers go to Whisper on Groq when this key is set (console.groq.com -> API Keys), and
+    # whisper_model above becomes the backup. Empty: only the local model.
+    groq_api_key: SecretStr = SecretStr("")
+    # whisper-large-v3: the most accurate of my tests. whisper-large-v3-turbo is cheaper.
+    groq_stt_model: str = "whisper-large-v3"
     # Only for reports: the worker hears the recordings again, when nobody is waiting. turbo made
     # the most sense of my real recordings, and is about 3x slower than small.en.
     scoring_whisper_model: str = "turbo"
