@@ -2,7 +2,7 @@
 
 Spoken mock interviews with an AI interviewer. You answer out loud, it listens and asks follow-up questions based on what you actually said, and when you're done you get a scored feedback report.
 
-**[Try it at offerward.vercel.app](https://offerward.vercel.app)**. It works in the browser on a laptop or a phone.
+Try it at **[offerward.vercel.app](https://offerward.vercel.app)**. It works in the browser on a laptop or a phone.
 
 <!-- demo GIF: docs/demo.gif -->
 
